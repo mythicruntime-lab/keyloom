@@ -91,6 +91,10 @@ export default function App() {
   const [preferences, setPreferences] =
     useState<Preferences>(DEFAULT_PREFERENCES);
   const [deviceList, setDeviceList] = useState<Device[]>([]);
+  const [outputDeviceList, setOutputDeviceList] = useState<Device[]>([]);
+  const [outputSelection, setOutputSelection] = useState<string | null>(null);
+  const [outputBusy, setOutputBusy] = useState(false);
+  const [lightTestPending, setLightTestPending] = useState(false);
   const [events, setEvents] = useState<MidiEvent[]>([]);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [busy, setBusy] = useState(false);
@@ -213,11 +217,14 @@ export default function App() {
   const applyPreferencesRef = useRef(updatePreferences);
   applyPreferencesRef.current = updatePreferences;
   const refreshDevices = useCallback(async () => {
-    try {
-      setDeviceList(await invoke<Device[]>("devices"));
-    } catch (reason) {
-      report(reason);
-    }
+    const [inputs, outputs] = await Promise.allSettled([
+      invoke<Device[]>("devices"),
+      invoke<Device[]>("output_devices"),
+    ]);
+    if (inputs.status === "fulfilled") setDeviceList(inputs.value);
+    else report(inputs.reason);
+    if (outputs.status === "fulfilled") setOutputDeviceList(outputs.value);
+    else report(outputs.reason);
   }, [report]);
 
   const importPaths = useCallback((paths: string[]) => {
@@ -403,10 +410,24 @@ export default function App() {
               latest.current.view === "library" ||
               previous.held.join(",") === value.held.join(",");
             const sameTransport =
-              latest.current.view !== "practice" ||
-              JSON.stringify(previous.transport) ===
-                JSON.stringify(value.transport);
-            return sameDevice && sameKeys && sameTransport ? previous : value;
+              latest.current.view === "practice"
+                ? JSON.stringify(previous.transport) ===
+                  JSON.stringify(value.transport)
+                : latest.current.view !== "devices" ||
+                  previous.transport.mode === value.transport.mode;
+            const sameOutput =
+              previous.output_device_id === value.output_device_id &&
+              previous.output_device_name === value.output_device_name &&
+              previous.output_connected === value.output_connected &&
+              previous.output_error === value.output_error &&
+              previous.light_guide === value.light_guide &&
+              previous.light_test_active === value.light_test_active &&
+              previous.output_messages === value.output_messages &&
+              (previous.lit_notes ?? []).join(",") ===
+                (value.lit_notes ?? []).join(",");
+            return sameDevice && sameKeys && sameTransport && sameOutput
+              ? previous
+              : value;
           });
           const incoming = value.events.filter(
             (event) => event.sequence > lastSequence,
@@ -450,6 +471,7 @@ export default function App() {
           (active.status.transport.playing ||
             active.status.transport.waiting ||
             active.status.device_connected ||
+            active.status.light_test_active ||
             active.preferences.simulated));
       const interval =
         needsLiveInput || performance.now() < fastUntil ? 33 : 250;
@@ -482,7 +504,14 @@ export default function App() {
   }, [report]);
   useEffect(() => {
     refreshStatusSoon.current();
-  }, [view, calibration, preferences.simulated, preferences.device_id]);
+  }, [
+    view,
+    calibration,
+    preferences.simulated,
+    preferences.device_id,
+    preferences.output_device_id,
+    preferences.light_guide,
+  ]);
 
   const flushSettings = useCallback(async () => {
     if (configTimer.current) {
@@ -642,6 +671,34 @@ export default function App() {
       report(reason);
     }
   };
+  const connectOutput = async (id: string | null) => {
+    setOutputBusy(true);
+    try {
+      await invoke("connect_output", { id });
+      const value = await invoke<Preferences>("preferences");
+      latest.current.preferences = value;
+      setPreferences(value);
+      refreshStatusSoon.current();
+    } catch (reason) {
+      report(reason);
+    } finally {
+      setOutputBusy(false);
+    }
+  };
+  const testLight = async () => {
+    setLightTestPending(true);
+    try {
+      await invoke("test_light");
+      refreshStatusSoon.current();
+      // Keep the control disabled until the backend's two-second test has had
+      // time to publish its active state and complete its release.
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+    } catch (reason) {
+      report(reason);
+    } finally {
+      setLightTestPending(false);
+    }
+  };
   const toggleFullscreen = async () => {
     try {
       const win = getCurrentWindow();
@@ -707,6 +764,14 @@ export default function App() {
   const hiddenImports = readyJobs.some(
     (job) => !entries.some((entry) => entry.id === job.result?.entry.id),
   );
+  const matchingOutputs = outputDeviceList.filter(
+    (device) =>
+      device.id === preferences.device_id && !device.id.includes("ambiguous]"),
+  );
+  const selectedOutputId =
+    outputSelection ??
+    preferences.output_device_id ??
+    (matchingOutputs.length === 1 ? matchingOutputs[0].id : "");
 
   return (
     <div className={`app-shell ${isFullscreen ? "fullscreen" : ""}`}>
@@ -820,6 +885,14 @@ export default function App() {
         {status.device_error && (
           <div role="status" className="inline-warning device-error">
             {status.device_error}{" "}
+            <button className="text-button" onClick={() => setView("devices")}>
+              Keyboard settings
+            </button>
+          </div>
+        )}
+        {status.output_error && (
+          <div role="status" className="inline-warning output-error">
+            Keyboard output: {status.output_error}{" "}
             <button className="text-button" onClick={() => setView("devices")}>
               Keyboard settings
             </button>
@@ -1179,6 +1252,30 @@ export default function App() {
                   </p>
                 </div>
                 <div className="button-row">
+                  <label
+                    className="check guide-toggle"
+                    title={
+                      status.output_connected
+                        ? "Lights current practice targets in Wait for me and Timed. Listen sends no guide notes."
+                        : "Connect a MIDI output in Keyboard & sound first."
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label="Light Guide in practice"
+                      checked={preferences.light_guide ?? false}
+                      disabled={
+                        !native ||
+                        (!status.output_connected && !preferences.light_guide)
+                      }
+                      onChange={(event) =>
+                        void updatePreferences({
+                          light_guide: event.target.checked,
+                        })
+                      }
+                    />
+                    Light Guide
+                  </label>
                   <button
                     className="small-button"
                     onClick={() => setShowParts((value) => !value)}
@@ -1235,9 +1332,7 @@ export default function App() {
                   />
                   {status.device_connected
                     ? status.device_name
-                    : preferences.simulated
-                      ? "Simulated input"
-                      : "No MIDI input"}
+                    : "No physical MIDI input"}
                 </span>
               </div>
               {outOfRange > 0 && (
@@ -1252,19 +1347,18 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {!status.device_connected &&
-                !preferences.simulated &&
-                settings.mode !== "listen" && (
-                  <div className="inline-warning">
-                    Connect a MIDI input in Keyboard & sound, or explicitly
-                    enable simulated input for a test.
-                  </div>
-                )}
+              {!status.device_connected && settings.mode !== "listen" && (
+                <div className="inline-warning">
+                  Connect a physical MIDI input in Keyboard & sound to practice.
+                  Simulated input is for monitoring only and cannot satisfy
+                  targets.
+                </div>
+              )}
               {preferences.simulated && (
                 <div className="simulation-notice">
-                  SIMULATED INPUT ENABLED · Click keys or use A W S E D F T G Y
-                  H U J K O L P ; (C4–E5). These results do not verify your
-                  Yamaha.
+                  SIMULATED MONITORING · Click keys or use A W S E D F T G Y H U
+                  J K O L P ; (C4–E5). Test notes cannot satisfy practice
+                  targets.
                 </div>
               )}
               <div className="practice-body">
@@ -1685,6 +1779,153 @@ export default function App() {
                   Reconnect saved interface
                 </button>
               </section>
+              <section className="settings-card guide-card">
+                <div className="card-title">
+                  <h2>Yamaha Light Guide</h2>
+                  <button
+                    className="small-button"
+                    onClick={() => void refreshDevices()}
+                    disabled={!native || outputBusy}
+                  >
+                    <Icon name="refresh" size={15} /> Refresh outputs
+                  </button>
+                </div>
+                <label className="field-label">
+                  MIDI output to the Yamaha
+                  <select
+                    aria-label="MIDI output"
+                    value={selectedOutputId}
+                    onChange={(event) => setOutputSelection(event.target.value)}
+                    disabled={!native || outputBusy}
+                  >
+                    <option value="">Choose an output</option>
+                    {selectedOutputId &&
+                      !outputDeviceList.some(
+                        (device) => device.id === selectedOutputId,
+                      ) && (
+                        <option value={selectedOutputId}>
+                          {selectedOutputId} · unavailable
+                        </option>
+                      )}
+                    {outputDeviceList.map((device) => (
+                      <option key={device.id} value={device.id}>
+                        {device.id === device.name ? device.name : device.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="button-row output-actions">
+                  <button
+                    className="small-button"
+                    disabled={!native || !selectedOutputId || outputBusy}
+                    onClick={() => void connectOutput(selectedOutputId)}
+                  >
+                    Connect output
+                  </button>
+                  <button
+                    className="small-button"
+                    disabled={
+                      !native ||
+                      (!status.output_connected &&
+                        !preferences.output_device_id) ||
+                      outputBusy
+                    }
+                    onClick={() => void connectOutput(null)}
+                  >
+                    Disconnect output
+                  </button>
+                </div>
+                <div className="device-state">
+                  <span
+                    className={`connection-dot ${status.output_connected ? "connected" : ""}`}
+                  />
+                  {outputBusy
+                    ? "Updating output connection…"
+                    : status.output_connected
+                      ? `Output connected · ${status.output_device_name ?? status.output_device_id}`
+                      : "Output disconnected"}
+                </div>
+                <p className="help-text">
+                  A unique matching interface is suggested. Choose Connect
+                  output to use it. Saved outputs reconnect on launch and clear
+                  old notes.
+                </p>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    aria-label="Light Guide"
+                    checked={preferences.light_guide ?? false}
+                    disabled={
+                      !native ||
+                      (!status.output_connected && !preferences.light_guide)
+                    }
+                    onChange={(event) =>
+                      void updatePreferences({
+                        light_guide: event.target.checked,
+                      })
+                    }
+                  />
+                  Light Guide
+                </label>
+                <p className="help-text">
+                  Light Guide sends only the current Wait for me or Timed
+                  practice targets. Listen sends no guide notes. Note messages
+                  may also sound the keyboard.
+                </p>
+                <p className="help-text">
+                  Keep MIDI Thru or echo disabled in other apps. Returned MIDI
+                  messages cannot identify whether they came from a key press.
+                </p>
+                <div className="guide-test-row">
+                  <button
+                    className="button secondary"
+                    disabled={
+                      !native ||
+                      !status.output_connected ||
+                      outputBusy ||
+                      lightTestPending ||
+                      status.light_test_active
+                    }
+                    onClick={() => void testLight()}
+                  >
+                    Test middle C
+                  </button>
+                  <span className="help-text">
+                    {lightTestPending || status.light_test_active
+                      ? "Testing middle C…"
+                      : "Two seconds · pauses practice"}
+                  </span>
+                </div>
+                <div className="guide-state" role="status">
+                  {status.light_test_active
+                    ? "Middle C test active"
+                    : status.light_guide
+                      ? status.transport.mode === "listen"
+                        ? "Light Guide on · silent in Listen"
+                        : "Light Guide on · follows current targets"
+                      : "Light Guide off"}
+                  <small>
+                    Notes sent:{" "}
+                    {(status.lit_notes ?? []).length
+                      ? status.lit_notes
+                          .map((pitch) =>
+                            noteName(pitch, preferences.note_numbers),
+                          )
+                          .join(", ")
+                      : "none"}{" "}
+                    · {(status.output_messages ?? 0).toLocaleString()} output
+                    messages
+                  </small>
+                </div>
+                <div className="guide-instructions">
+                  <strong>On the Yamaha EZ-150</strong>
+                  <p>
+                    Connect the adapter’s OUT cable to the Yamaha’s MIDI IN. Set
+                    OVERALL o1 to On, and stop any built-in song playback before
+                    testing.
+                  </p>
+                </div>
+              </section>
               <section className="settings-card">
                 <h2>How do you want to listen?</h2>
                 <label
@@ -1737,7 +1978,8 @@ export default function App() {
                 </p>
                 <p className="help-text">
                   Arrangement playback uses PC audio. No SoundFont or sampled
-                  piano is bundled. MIDI output and MIDI Thru are off.
+                  piano is bundled. MIDI Thru is off. Light Guide uses the
+                  separately connected keyboard output.
                 </p>
               </section>
               <section className="settings-card">
@@ -1841,8 +2083,9 @@ export default function App() {
                 </label>
                 <p className="help-text">
                   Click the on-screen piano or use computer keys A W S E D F T G
-                  Y H U J K O L P ;. Simulated input can satisfy practice
-                  targets, but it does not verify the physical keyboard.
+                  Y H U J K O L P ;. These are monitoring tests only. They
+                  cannot satisfy practice targets or verify the physical
+                  keyboard.
                 </p>
                 <div className="test-keys">
                   {[60, 62, 64, 65, 67, 69, 71, 72].map((pitch) => (

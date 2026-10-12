@@ -1,4 +1,4 @@
-use midir::{Ignore, MidiInput, MidiInputConnection};
+use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use serde::Serialize;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -85,5 +85,53 @@ pub fn connect(
             },
             (),
         )
+        .map_err(|e| e.to_string())
+}
+
+/// Output is a separate WinMM connection, with no internal route to the input
+/// callback/matcher. External MIDI echo/Thru must be disabled: the MIDI wire
+/// carries no provenance that distinguishes returned output from real keys.
+/// Imported MIDI is never forwarded.
+pub fn output_devices() -> Result<Vec<Device>, String> {
+    let output = MidiOutput::new("Keyloom guide device list").map_err(|e| e.to_string())?;
+    let names: Vec<String> = output
+        .ports()
+        .iter()
+        .map(|p| {
+            output
+                .port_name(p)
+                .unwrap_or_else(|_| "Unnamed MIDI output".into())
+        })
+        .collect();
+    Ok(names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Device {
+            id: if names.iter().filter(|n| *n == name).count() == 1 {
+                name.clone()
+            } else {
+                format!("{name} [port {i}; ambiguous]")
+            },
+            name: name.clone(),
+        })
+        .collect())
+}
+
+pub fn connect_output(id: &str) -> Result<MidiOutputConnection, String> {
+    let listing = output_devices()?;
+    let index = listing
+        .iter()
+        .position(|d| d.id == id)
+        .ok_or("Selected output is unavailable; refresh devices and select it again")?;
+    let output = MidiOutput::new("Keyloom light guide").map_err(|e| e.to_string())?;
+    let ports = output.ports();
+    let port = ports
+        .get(index)
+        .ok_or("MIDI output changed; refresh and retry")?;
+    if output.port_name(port).map_err(|e| e.to_string())? != listing[index].name {
+        return Err("MIDI output changed during selection; refresh and retry".into());
+    }
+    output
+        .connect(port, "Keyloom channel 1 light guide")
         .map_err(|e| e.to_string())
 }

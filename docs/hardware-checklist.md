@@ -4,6 +4,16 @@
 
 The owner reports that **Wait for me works well on the Yamaha** and that **reconnecting works well**. The owner does not have a pedal, so physical pedal testing is not applicable to this setup. These are owner-reported playing results, separate from the automated evidence below; the individual edge cases have not all been confirmed.
 
+## EZ-150 Light Guide — verified with owner, 11 October 2026
+
+- Adapter OUT → Yamaha MIDI IN, with keyboard Light Guide enabled: owner confirmed connected and ready.
+- Native **Test middle C**: owner saw middle C illuminate and turn off after about two seconds.
+- Original First threads exercise in Wait for me: owner confirmed it stayed still hands-off, advanced only after real key presses, and lit the next correct keys.
+- With hands released, owner confirmed **Pause**, **Stop**, and opening a different song each cleared the physical guide lights.
+- Native software evidence separately records successful channel-1 sends/cleanup and no automatic matching; optical illumination is established by the owner's observations above.
+
+Additional hardware checks: Timed mode and selected-hand guidance across longer songs; toggle-off/Panic/exit while lit; cable loss/reconnection with lights active. Driver send success is not delivery confirmation after a broken cable. Disable external MIDI Thru/echo; MIDI messages have no physical-origin metadata. No pedal is owned.
+
 ## Remaining detailed checks
 
 Native port enumeration, two open/close/reopen cycles of USB MIDI Interface, and WASAPI callback operation passed in the installed and portable builds. Simulated keys and callback samples are not physical-keyboard or audible-latency evidence.

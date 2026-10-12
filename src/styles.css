@@ -1911,6 +1911,51 @@ main {
 main:has(> .import-banner) .practice-body {
   height: calc(100vh - 420px);
 }
+.guide-toggle {
+  white-space: nowrap;
+  font-size: 11px;
+}
+.output-actions,
+.guide-test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.guide-test-row {
+  margin-top: 18px;
+}
+.guide-state {
+  padding: 12px;
+  margin-top: 16px;
+  border: 1px solid #3b5c56;
+  border-radius: 6px;
+  background: #203936;
+  color: #c2e3d5;
+  font-size: 11px;
+}
+.guide-state small {
+  display: block;
+  margin-top: 6px;
+  color: #98b4ad;
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.guide-instructions {
+  border-top: 1px solid #35495c;
+  padding-top: 15px;
+  margin-top: 17px;
+  color: #adc2cc;
+  font-size: 11px;
+}
+.guide-instructions strong {
+  color: #d1e2dd;
+  font-size: 12px;
+}
+.guide-instructions p {
+  margin-top: 6px;
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

@@ -1,4 +1,4 @@
-param([string]$Exe, [string]$TestRoot, [string]$Midi, [string]$Device)
+param([string]$Exe, [string]$TestRoot, [string]$Midi, [string]$Device, [string]$OutputDevice)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 if (!$Exe) { $Exe = Join-Path $root 'src-tauri\target\release\keyloom.exe' }
@@ -13,6 +13,7 @@ foreach ($phase in @('exercise','restart')) {
     if ($phase -eq 'restart') { $argsList += '--smoke-restart' }
     if ($Midi) { $argsList += @('--smoke-midi', ('"' + (Resolve-Path -LiteralPath $Midi).Path + '"')) }
     if ($Device) { $argsList += @('--smoke-device', ('"' + $Device + '"')) }
+    if ($OutputDevice) { $argsList += @('--smoke-output', ('"' + $OutputDevice + '"')) }
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $app = Start-Process -FilePath $Exe -ArgumentList $argsList -WorkingDirectory $root -PassThru
     $samples = @()

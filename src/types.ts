@@ -94,6 +94,8 @@ export interface Device {
 }
 export interface Preferences {
   device_id: string | null;
+  output_device_id: string | null;
+  light_guide: boolean;
   monitor: string;
   simulated: boolean;
   low: number;
@@ -131,6 +133,14 @@ export interface AppStatus {
   device_name: string | null;
   device_connected: boolean;
   device_error?: string | null;
+  output_device_id: string | null;
+  output_device_name: string | null;
+  output_connected: boolean;
+  output_error: string | null;
+  light_guide: boolean;
+  light_test_active: boolean;
+  lit_notes: number[];
+  output_messages: number;
   audio_available: boolean;
   audio_error: string | null;
   events: MidiEvent[];
@@ -139,6 +149,8 @@ export interface AppStatus {
 }
 export const DEFAULT_PREFERENCES: Preferences = {
   device_id: null,
+  output_device_id: null,
+  light_guide: false,
   monitor: "yamaha",
   simulated: false,
   low: 36,
@@ -166,6 +178,14 @@ export const EMPTY_STATUS: AppStatus = {
   device_id: null,
   device_name: null,
   device_connected: false,
+  output_device_id: null,
+  output_device_name: null,
+  output_connected: false,
+  output_error: null,
+  light_guide: false,
+  light_test_active: false,
+  lit_notes: [],
+  output_messages: 0,
   audio_available: false,
   audio_error: null,
   events: [],

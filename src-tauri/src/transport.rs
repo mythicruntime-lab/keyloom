@@ -92,11 +92,12 @@ pub struct Engine {
     wall_ms: f64,
     groups: Vec<Group>,
     group_index: usize,
+    guide_revision: u64,
     matches: [Option<f64>; 128],
     // Timed pitch/onset credit outlives the shorter live chord-entry state.
     // Each eligible pitch earns credit once even if the rest of its chord is missed.
     timed_credit: [bool; 128],
-    held: [[bool; 128]; 2],
+    held: [bool; 128],
     timeline: Vec<Scheduled>,
     event_index: usize,
     audio_ends: Vec<f64>,
@@ -130,9 +131,10 @@ impl Engine {
             wall_ms: 0.0,
             groups: Vec::new(),
             group_index: 0,
+            guide_revision: 0,
             matches: [None; 128],
             timed_credit: [false; 128],
-            held: [[false; 128]; 2],
+            held: [false; 128],
             timeline: Vec::new(),
             event_index: 0,
             audio_ends: Vec::new(),
@@ -155,7 +157,7 @@ impl Engine {
         self.settings = settings;
         self.sanitize_settings();
         self.playing = false;
-        self.held = [[false; 128]; 2];
+        self.held = [false; 128];
         self.correct = 0;
         self.wrong = 0;
         self.missed = 0;
@@ -206,6 +208,7 @@ impl Engine {
     /// Seeking rebuilds crossing voices once. It never makes already held keys
     /// count as fresh input and never emits an imported MIDI device command.
     pub fn seek(&mut self, ms: f64) {
+        self.bump_guide_revision();
         self.position = finite(ms, 0.0).clamp(0.0, self.duration());
         self.settings.position_ms = self.position;
         self.waiting = false;
@@ -359,18 +362,15 @@ impl Engine {
     }
 
     pub fn input(&mut self, pitch: u8, on: bool, velocity: u8, source: InputSource) {
-        if pitch > 127 || source == InputSource::Playback {
+        // Screen/test tones and guide/playback output are never player input.
+        // Reject their releases too: they must not rearm a physically held key.
+        if pitch > 127 || source == InputSource::Simulated || source == InputSource::Playback {
             return;
         }
-        let source_index = if source == InputSource::Physical {
-            0
-        } else {
-            1
-        };
         let p = usize::from(pitch);
         let down = on && velocity > 0;
-        let fresh = down && !self.held[source_index][p];
-        self.held[source_index][p] = down;
+        let fresh = down && !self.held[p];
+        self.held[p] = down;
         if !fresh || !self.playing || self.count_in_remaining > 0 || self.settings.mode == "listen"
         {
             return;
@@ -404,6 +404,7 @@ impl Engine {
         {
             self.correct = self.correct.saturating_add(group.pitches.len() as u32);
             self.group_index += 1;
+            self.bump_guide_revision();
             self.matches = [None; 128];
             self.timed_credit = [false; 128];
             self.waiting = false;
@@ -412,6 +413,27 @@ impl Engine {
         } else {
             self.feedback = "Complete the chord within 150 ms".into();
         }
+    }
+
+    /// Read-only intent for an explicitly enabled external Light Guide. This is
+    /// never fed to `input`: only the separate physical MIDI path can score.
+    ///
+    /// Identity is stable for one group, including partial chords, and changes
+    /// on group advancement, seek, loop, load, or rebuilt practice selection.
+    /// It is scoped to this Engine instance; consumers must clear their cached
+    /// identity when an engine/device/session is replaced or this returns None.
+    /// The full chord is returned so guide output need not flicker after one hit.
+    pub fn guide_targets(&self) -> Option<(u64, Vec<u8>)> {
+        if !self.playing || self.count_in_remaining > 0 {
+            return None;
+        }
+        let group = self.groups.get(self.group_index)?;
+        let eligible = match self.settings.mode.as_str() {
+            "wait" => self.waiting,
+            "timed" => (group.time - self.position).abs() / self.settings.speed <= INPUT_WINDOW_MS,
+            _ => false,
+        };
+        eligible.then(|| (self.guide_revision, group.pitches.clone()))
     }
 
     pub fn snapshot(&self) -> TransportSnapshot {
@@ -484,6 +506,7 @@ impl Engine {
     }
 
     fn rebuild(&mut self) {
+        self.bump_guide_revision();
         self.groups.clear();
         self.timeline.clear();
         self.audio_ends.clear();
@@ -743,8 +766,13 @@ impl Engine {
             .missed
             .saturating_add(group.pitches.len() as u32 - matched);
         self.group_index += 1;
+        self.bump_guide_revision();
         self.matches = [None; 128];
         self.timed_credit = [false; 128];
+    }
+
+    fn bump_guide_revision(&mut self) {
+        self.guide_revision = self.guide_revision.wrapping_add(1);
     }
 
     fn tick_at(&self, ms: f64) -> f64 {
@@ -909,10 +937,12 @@ mod tests {
     }
 
     fn press(e: &mut Engine, pitch: u8) {
-        e.input(pitch, true, 100, InputSource::Simulated);
+        // Synthetic deterministic harness injection of the physical-path tag;
+        // this does not verify any real keyboard, MIDI adapter, or Light Guide.
+        e.input(pitch, true, 100, InputSource::Physical);
     }
     fn release(e: &mut Engine, pitch: u8) {
-        e.input(pitch, false, 0, InputSource::Simulated);
+        e.input(pitch, false, 0, InputSource::Physical);
     }
 
     #[test]
@@ -1167,7 +1197,7 @@ mod tests {
         e.advance(f64::NAN);
         press(&mut e, 60);
         e.advance(200.0);
-        e.input(60, true, 0, InputSource::Simulated);
+        e.input(60, true, 0, InputSource::Physical);
         press(&mut e, 60);
         assert_eq!(e.snapshot().correct, 2);
         assert_eq!(e.snapshot().position_ms, 200.0);
@@ -1665,5 +1695,250 @@ mod tests {
         e.advance(91.0);
         assert_eq!(e.snapshot().correct, 1);
         assert_eq!(e.snapshot().missed, 1);
+    }
+
+    #[test]
+    fn simulated_and_playback_cannot_score_or_rearm_physical_repetitions() {
+        let mut e = engine("wait", &[(60, 0.0, 100.0, 0), (60, 200.0, 300.0, 0)]);
+        e.advance(0.0);
+        let guide = e.guide_targets();
+        for source in [InputSource::Simulated, InputSource::Playback] {
+            e.input(60, true, 100, source);
+            e.input(70, true, 100, source);
+            e.input(60, false, 0, source);
+        }
+        assert_eq!(e.snapshot().correct, 0);
+        assert_eq!(e.snapshot().wrong, 0);
+        assert!(e.snapshot().matched.is_empty());
+        assert_eq!(e.guide_targets(), guide);
+        press(&mut e, 60);
+        assert_eq!(e.snapshot().correct, 1);
+        e.advance(200.0);
+        for source in [InputSource::Simulated, InputSource::Playback] {
+            e.input(60, false, 0, source);
+            e.input(60, true, 0, source);
+        }
+        press(&mut e, 60);
+        assert!(
+            e.snapshot().waiting,
+            "nonphysical offs must not rearm the held physical key"
+        );
+        assert_eq!(e.snapshot().correct, 1);
+        release(&mut e, 60);
+        press(&mut e, 60);
+        assert_eq!(e.snapshot().correct, 2);
+    }
+
+    #[test]
+    fn simulated_and_playback_do_not_earn_timed_pitch_credit() {
+        let mut e = engine("timed", &[(60, 100.0, 500.0, 0), (64, 100.0, 500.0, 0)]);
+        e.advance(100.0);
+        e.input(60, true, 100, InputSource::Simulated);
+        e.input(64, true, 100, InputSource::Playback);
+        e.advance(151.0);
+        assert_eq!(e.snapshot().correct, 0);
+        assert_eq!(e.snapshot().wrong, 0);
+        assert_eq!(e.snapshot().missed, 2);
+    }
+
+    #[test]
+    fn wait_guide_identity_changes_for_repeated_pitch_groups() {
+        let mut e = engine("wait", &[(60, 0.0, 100.0, 0), (60, 200.0, 300.0, 0)]);
+        assert!(e.guide_targets().is_none());
+        e.advance(0.0);
+        let first = e.guide_targets().unwrap();
+        assert_eq!(first.1, vec![60]);
+        assert_eq!(e.guide_targets(), Some(first.clone()));
+        press(&mut e, 60);
+        assert!(e.guide_targets().is_none());
+        e.advance(200.0);
+        let next = e.guide_targets().unwrap();
+        assert_eq!(next.1, first.1);
+        assert_ne!(next.0, first.0);
+    }
+
+    #[test]
+    fn guide_lifecycle_clears_on_pause_stop_seek_and_revises_on_rebuild_load() {
+        let notes = [(60, 100.0, 300.0, 0)];
+        let mut e = engine("wait", &notes);
+        e.advance(100.0);
+        let original = e.guide_targets().unwrap().0;
+        e.pause();
+        assert!(e.guide_targets().is_none());
+        e.play();
+        assert_eq!(e.guide_targets().unwrap().0, original);
+        e.seek(100.0);
+        assert!(e.guide_targets().is_none());
+        e.advance(0.0);
+        let after_seek = e.guide_targets().unwrap().0;
+        assert_ne!(after_seek, original);
+        e.configure(SongSettings {
+            mode: "wait".into(),
+            parts: vec![PartSetting {
+                part_id: 0,
+                role: "practice".into(),
+                hand: "right".into(),
+                volume: 0.5,
+                solo: false,
+            }],
+            ..SongSettings::default()
+        });
+        assert!(e.guide_targets().is_none());
+        e.advance(0.0);
+        let after_rebuild = e.guide_targets().unwrap().0;
+        assert_ne!(after_rebuild, after_seek);
+        e.stop();
+        assert!(e.guide_targets().is_none());
+        e.play();
+        e.advance(100.0);
+        let after_stop = e.guide_targets().unwrap().0;
+        assert_ne!(after_stop, after_rebuild);
+        e.load(
+            song(&notes),
+            SongSettings {
+                mode: "wait".into(),
+                ..SongSettings::default()
+            },
+        );
+        assert!(e.guide_targets().is_none());
+        e.play();
+        e.advance(100.0);
+        assert_ne!(e.guide_targets().unwrap().0, after_stop);
+    }
+
+    #[test]
+    fn guide_loop_rearms_same_chord_with_a_new_identity() {
+        let mut e = Engine::new();
+        e.load(
+            song(&[(60, 100.0, 200.0, 0)]),
+            SongSettings {
+                mode: "wait".into(),
+                position_ms: 100.0,
+                loop_start_ms: Some(100.0),
+                loop_end_ms: Some(300.0),
+                ..SongSettings::default()
+            },
+        );
+        e.play();
+        e.advance(0.0);
+        let first = e.guide_targets().unwrap();
+        press(&mut e, 60);
+        e.advance(200.0);
+        assert_eq!(e.snapshot().position_ms, 100.0);
+        e.advance(0.0);
+        let repeated = e.guide_targets().unwrap();
+        assert_eq!(repeated.1, first.1);
+        assert_ne!(repeated.0, first.0);
+        press(&mut e, 60);
+        assert_eq!(e.guide_targets(), Some(repeated));
+    }
+
+    #[test]
+    fn timed_guide_window_uses_wall_time_at_current_speed() {
+        let mut e = Engine::new();
+        e.load(
+            song(&[(60, 500.0, 900.0, 0)]),
+            SongSettings {
+                mode: "timed".into(),
+                speed: 0.5,
+                ..SongSettings::default()
+            },
+        );
+        e.play();
+        assert!(e.guide_targets().is_none());
+        e.advance(849.0);
+        assert!(e.guide_targets().is_none());
+        e.advance(1.0);
+        let first = e.guide_targets().unwrap();
+        assert_eq!(e.snapshot().position_ms, 425.0);
+        e.advance(300.0);
+        assert_eq!(e.snapshot().position_ms, 575.0);
+        assert_eq!(e.guide_targets(), Some(first));
+        e.advance(0.1);
+        assert!(e.guide_targets().is_none());
+    }
+
+    #[test]
+    fn timed_guide_revises_identity_after_a_missed_repeated_pitch() {
+        let mut e = engine("timed", &[(60, 100.0, 200.0, 0), (60, 300.0, 400.0, 0)]);
+        e.advance(100.0);
+        let first = e.guide_targets().unwrap();
+        e.advance(151.0);
+        let next = e.guide_targets().unwrap();
+        assert_eq!(e.snapshot().missed, 1);
+        assert_eq!(first.1, next.1);
+        assert_ne!(first.0, next.0);
+    }
+
+    #[test]
+    fn guide_stays_off_during_count_in_and_listen() {
+        let mut e = Engine::new();
+        e.load(
+            song(&[(60, 0.0, 500.0, 0)]),
+            SongSettings {
+                mode: "wait".into(),
+                count_in: true,
+                ..SongSettings::default()
+            },
+        );
+        e.play();
+        assert!(e.guide_targets().is_none());
+        e.advance(1999.0);
+        assert!(e.guide_targets().is_none());
+        e.advance(1.0);
+        assert_eq!(e.guide_targets().unwrap().1, vec![60]);
+        e.configure(SongSettings {
+            mode: "listen".into(),
+            ..SongSettings::default()
+        });
+        e.advance(0.0);
+        assert!(e.is_playing());
+        assert!(e.guide_targets().is_none());
+    }
+
+    #[test]
+    fn guide_uses_filtered_practice_chord_and_is_read_only() {
+        let mut s = song(&[
+            (48, 0.0, 500.0, 0),
+            (60, 0.0, 500.0, 0),
+            (72, 0.0, 500.0, 0),
+            (84, 0.0, 500.0, 1),
+            (90, 0.0, 500.0, 0),
+        ]);
+        s.notes[4].channel = 9;
+        let mut settings = SongSettings {
+            mode: "timed".into(),
+            split_pitch: Some(60),
+            split_hand: "right".into(),
+            parts: vec![PartSetting {
+                part_id: 0,
+                role: "practice".into(),
+                hand: "left".into(),
+                volume: 1.0,
+                solo: true,
+            }],
+            ..SongSettings::default()
+        };
+        let mut e = Engine::new();
+        e.load(s, settings.clone());
+        e.play();
+        let mut copy = e.guide_targets().unwrap();
+        assert_eq!(copy.1, vec![60, 72]);
+        copy.1.clear();
+        assert_eq!(e.guide_targets().unwrap().1, vec![60, 72]);
+        assert_eq!(e.snapshot().correct, 0);
+        press(&mut e, 60);
+        assert_eq!(e.guide_targets().unwrap().1, vec![60, 72]);
+        assert_eq!(e.guide_targets().unwrap().0, copy.0);
+        settings.parts[0].role = "muted".into();
+        e.configure(settings.clone());
+        assert!(e.guide_targets().is_none());
+        settings.parts[0].role = "accompaniment".into();
+        e.configure(settings.clone());
+        assert!(e.guide_targets().is_none());
+        settings.parts[0].role = "practice".into();
+        settings.split_hand = "left".into();
+        e.configure(settings);
+        assert_eq!(e.guide_targets().unwrap().1, vec![48]);
     }
 }

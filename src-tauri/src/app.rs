@@ -34,6 +34,7 @@ struct SmokeConfig {
     paths: Vec<String>,
     expected_count: usize,
     device_id: Option<String>,
+    output_device_id: Option<String>,
 }
 #[derive(Serialize)]
 pub struct ImportOutcome {
@@ -292,6 +293,42 @@ async fn export_song(id: String, state: tauri::State<'_, AppState>) -> Result<()
 async fn devices() -> Result<Vec<midi::Device>, String> {
     blocking(midi::devices).await
 }
+#[tauri::command]
+async fn output_devices() -> Result<Vec<midi::Device>, String> {
+    blocking(midi::output_devices).await
+}
+#[tauri::command(rename_all = "snake_case")]
+async fn connect_output(
+    id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let runtime = state.runtime.clone();
+    let prefs = state.preferences.clone();
+    let root = state.root.clone();
+    blocking(move || {
+        let mut p = prefs.lock().map_err(lock_error)?;
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        runtime.send(Command::ConnectOutput(id.clone(), tx))?;
+        let result = rx
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "MIDI output connection timed out")?;
+        p.output_device_id = id;
+        write_preferences(&root, &p)?;
+        result
+    })
+    .await
+}
+#[tauri::command]
+async fn test_light(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let runtime = state.runtime.clone();
+    blocking(move || {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        runtime.send(Command::TestLight(tx))?;
+        rx.recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "Light test timed out")?
+    })
+    .await
+}
 #[tauri::command(rename_all = "snake_case")]
 async fn connect_device(
     id: Option<String>,
@@ -388,8 +425,12 @@ async fn preferences(
                 return Err("Choose Yamaha or software monitoring".into());
             }
             value.device_id = current.device_id.clone();
-            write_preferences(&root, &value)?;
-            runtime.send(Command::Preferences(value.clone()))?;
+            value.output_device_id = current.output_device_id.clone();
+            runtime.set_preferences(value.clone())?;
+            if let Err(error) = write_preferences(&root, &value) {
+                runtime.set_preferences(current.clone()).ok();
+                return Err(error);
+            }
             *current = value;
         }
         Ok(current.clone())
@@ -519,12 +560,12 @@ pub fn run() {
     })).setup(move |app|{
         let args:Vec<String>=std::env::args().collect();let smoke_root=args.iter().position(|a|a=="--smoke-test").and_then(|i|args.get(i+1)).map(PathBuf::from);
         let root=smoke_root.clone().unwrap_or(app.path().app_local_data_dir()?);std::fs::create_dir_all(&root)?;let library=Library::open(root.clone()).map_err(std::io::Error::other)?;
-        let smoke=if smoke_root.is_some(){let directory=root.join("inputs with spaces 日本語");std::fs::create_dir_all(&directory)?;let first=directory.join("First threads.mid");let second=directory.join("Tempo and pedal.midi");let corrupt=directory.join("Broken.mid");if !args.iter().any(|a|a=="--smoke-restart"){std::fs::write(&first,fixtures::demo_midi())?;std::fs::write(&second,fixtures::tempo_sustain())?;std::fs::write(&corrupt,b"invalid MIDI")?;}let first=args.iter().position(|a|a=="--smoke-midi").and_then(|i|args.get(i+1)).map(PathBuf::from).unwrap_or(first);Some(SmokeConfig{phase:if args.iter().any(|a|a=="--smoke-restart"){"restart"}else{"exercise"}.into(),paths:[first,second,corrupt].iter().map(|p|p.to_string_lossy().into_owned()).collect(),expected_count:2,device_id:args.iter().position(|a|a=="--smoke-device").and_then(|i|args.get(i+1)).cloned()})}else{None};
+        let smoke=if smoke_root.is_some(){let directory=root.join("inputs with spaces 日本語");std::fs::create_dir_all(&directory)?;let first=directory.join("First threads.mid");let second=directory.join("Tempo and pedal.midi");let corrupt=directory.join("Broken.mid");if !args.iter().any(|a|a=="--smoke-restart"){std::fs::write(&first,fixtures::demo_midi())?;std::fs::write(&second,fixtures::tempo_sustain())?;std::fs::write(&corrupt,b"invalid MIDI")?;}let first=args.iter().position(|a|a=="--smoke-midi").and_then(|i|args.get(i+1)).map(PathBuf::from).unwrap_or(first);Some(SmokeConfig{phase:if args.iter().any(|a|a=="--smoke-restart"){"restart"}else{"exercise"}.into(),paths:[first,second,corrupt].iter().map(|p|p.to_string_lossy().into_owned()).collect(),expected_count:2,device_id:args.iter().position(|a|a=="--smoke-device").and_then(|i|args.get(i+1)).cloned(),output_device_id:args.iter().position(|a|a=="--smoke-output").and_then(|i|args.get(i+1)).cloned()})}else{None};
         let preferences=read_preferences(&root);let runtime=Runtime::start(preferences.clone());let pending=if smoke.is_some(){Vec::new()}else{file_args(std::env::args().skip(1),&std::env::current_dir()?)};
         app.manage(AppState{library:Arc::new(Mutex::new(library)),runtime,preferences:Arc::new(Mutex::new(preferences)),root,pending:Mutex::new(pending),importing:Arc::new(AtomicBool::new(false)),operations:Arc::new(Mutex::new(())),smoke,started,launch_to_ui_us:AtomicU64::new(0)});
         let handle=app.handle().clone();std::thread::Builder::new().name("keyloom-save".into()).spawn(move||loop{std::thread::sleep(Duration::from_secs(5));if let Some(state)=handle.try_state::<AppState>(){if persist(&state).is_err(){/* Kept out of timing path; exit retries persistence. */}}else{break;}})?;
         Ok(())
-    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,save_metadata,save_settings,remove_song,export_song,devices,connect_device,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
+    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
     let application = builder
         .build(tauri::generate_context!())
         .expect("Keyloom could not initialize its local application data or WebView2 window");
@@ -532,7 +573,13 @@ pub fn run() {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
             if let Some(state) = app.try_state::<AppState>() {
                 persist(&state).ok();
-                state.runtime.send(Command::Shutdown).ok();
+                if let Err(error) = state.runtime.shutdown() {
+                    rfd::MessageDialog::new()
+                        .set_title("Keyloom MIDI cleanup")
+                        .set_description(&error)
+                        .set_level(rfd::MessageLevel::Warning)
+                        .show();
+                }
             }
         }
     });

@@ -333,7 +333,7 @@ export default function PianoRoll(props: Props) {
     <canvas
       ref={canvas}
       className={`piano-roll ${props.preferences.simulated ? "can-play" : ""}`}
-      aria-label="Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. Simulated key input requires enabling the test input switch."
+      aria-label="Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. On-screen keys are for simulated monitoring only and cannot satisfy practice targets. Enable test input to use them."
       onPointerDown={(event) => {
         if (!props.preferences.simulated) return;
         const rect = event.currentTarget.getBoundingClientRect();

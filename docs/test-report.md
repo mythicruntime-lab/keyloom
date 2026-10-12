@@ -1,5 +1,19 @@
 # Keyloom verification
 
+## 0.1.2 Yamaha Light Guide — 11 October 2026
+
+**Physical acceptance passed with the owner on a Yamaha EZ-150 through USB MIDI Interface.** The owner confirmed the adapter OUT → keyboard IN connection and keyboard Light Guide setting; then observed middle C light and turn off after about two seconds. In First threads/Wait for me, the owner confirmed no hands-off advancement, correct advancement only after playing the physical keys, and illumination of the next targets. The owner then confirmed that pause, stop and opening a different song each cleared the physical lights. These are explicit owner observations; native status alone cannot prove LEDs or sound.
+
+Rust passed **102 test executions** (54 unit + 48 integration, 63 distinct cases). The earlier optional 1,000-song benchmark remained ignored. New cases cover old-preferences compatibility, physical-only scoring, simulated/playback releases unable to rearm physical keys, guide chord identity/lifecycle/role filtering, count-in, Timed windows, repeated notes, note deduplication and partial/ambiguous send failures with cleanup retries. Strict Clippy (`--all-targets --features custom-protocol -- -D warnings`), Rust formatting, TypeScript and the production build passed.
+
+The release executable passed **nine real native UI exercise checks plus persistence restart** in isolated `test-output/light-guide-012`: 8,231.4 ms exercise, 230.5 ms restart. This includes import-to-library-to-play, corrupt/duplicate imports, metadata/settings, simulated events remaining visible but never scoring, USB input open/reopen, explicit USB output selection, the middle-C button/timeout, guide targets staying unscored with hands off, and pause/stop/song-change/disconnect cleanup. The output sequence reported 142 successful MIDI messages and no output error. That count includes the 128 Note Off baseline on connect; it is not an optical measurement. Five normal-library arrangements remained available in the updated app.
+
+```powershell
+powershell -File scripts/Native-Smoke.ps1 -Device 'USB MIDI Interface' -OutputDevice 'USB MIDI Interface'
+```
+
+The optional output argument sends actual guide notes and can sound the keyboard. Ordinary tests do not claim physical verification. Remaining hardware coverage: long sessions, Timed guidance, cable loss while lit, and failed-driver recovery. Simulated UI keys now monitor only, superseding the positive simulated matching behavior in historical 0.1.0/0.1.1 evidence. General playback output and MIDI Thru remain absent; no dependencies or third-party assets were added.
+
 ## Owner follow-up — 11 October 2026
 
 After adding more songs and playing, the owner reports that Wait for me and reconnect work well on the Yamaha. The owner has no pedal; physical pedal verification is not applicable to this setup. This supersedes the corresponding basic checks marked unverified in the original delivery evidence below, without claiming every repeated-note/chord/reconnect edge case was exercised.

@@ -3,6 +3,7 @@ mod app;
 mod audio;
 mod fixtures;
 mod library;
+mod light_guide;
 mod midi;
 mod model;
 mod parser;

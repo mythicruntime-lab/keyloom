@@ -9,6 +9,7 @@ interface SmokeConfig {
   paths: string[];
   expected_count: number;
   device_id?: string | null;
+  output_device_id?: string | null;
 }
 interface Check {
   name: string;
@@ -483,7 +484,7 @@ export async function runNativeSmoke() {
         },
       );
       await check(
-        "explicit simulated player input satisfies native wait target; physical keyboard remains unverified",
+        "simulated input is monitored but cannot satisfy the native wait target",
         async () => {
           await navigate("Keyboard & sound", ".devices-view");
           const enabled = inputByLabel("Enable simulated player input");
@@ -519,10 +520,14 @@ export async function runNativeSmoke() {
           );
           for (const pitch of waiting.transport.targets)
             await invoke("input_note", { pitch, on: true, velocity: 90 });
-          await waitFor(
-            "injected player chord accepted by real native matcher",
-            async () =>
-              (await snapshot()).transport.correct > waiting.transport.correct,
+          await sleep(240);
+          const untouched = await snapshot();
+          assert(
+            untouched.transport.correct === waiting.transport.correct &&
+              untouched.transport.waiting &&
+              Math.abs(untouched.transport.position_ms - position) < 1 &&
+              untouched.transport.matched.length === 0,
+            "Simulated notes must not satisfy, advance or partially match physical practice",
           );
           for (const pitch of waiting.transport.targets)
             await invoke("input_note", { pitch, on: false, velocity: 0 });
@@ -599,6 +604,143 @@ export async function runNativeSmoke() {
           },
         );
       }
+    }
+    if (config.phase === "exercise" && config.output_device_id) {
+      const first = (await library()).find(
+        (entry) => entry.title === PERSISTED_TITLE,
+      );
+      assert(first, "Persisted first arrangement missing before guide test");
+      await check(
+        "native channel-1 Light Guide test and cleanup; physical illumination requires owner observation",
+        async () => {
+          assert(
+            config.device_id,
+            "Light Guide smoke needs both input and output device IDs",
+          );
+          await invoke("connect_device", { id: config.device_id });
+          await navigate("Keyboard & sound", ".devices-view");
+          const select = get<HTMLSelectElement>(
+            'select[aria-label="MIDI output"]',
+          );
+          const setter = Object.getOwnPropertyDescriptor(
+            HTMLSelectElement.prototype,
+            "value",
+          )!.set!;
+          setter.call(select, config.output_device_id);
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          await sleep(100);
+          button("Connect output").click();
+          await waitFor(
+            "native output connected",
+            async () => (await snapshot()).output_connected,
+          );
+          button("Test middle C").click();
+          await waitFor("middle C test Note On sent", async () => {
+            const s = await snapshot();
+            return s.light_test_active && s.lit_notes.join() === "60";
+          });
+          await waitFor(
+            "middle C automatic Note Off",
+            async () => {
+              const s = await snapshot();
+              return !s.light_test_active && !s.lit_notes.length;
+            },
+            5000,
+          );
+          const toggle = inputByLabel("Light Guide");
+          if (!toggle.checked) toggle.click();
+          await waitFor(
+            "guide enabled",
+            async () => (await snapshot()).light_guide,
+          );
+          await navigate("Practice", ".practice-view");
+          button("Wait for me").click();
+          button("Restart").click();
+          await waitFor(
+            "guide practice reset",
+            async () => !(await snapshot()).transport.playing,
+          );
+          await sleep(100);
+          const lightTarget = async () => {
+            button("Play").click();
+            return waitFor("practice target sent to output", async () => {
+              const s = await snapshot();
+              return s.transport.waiting && s.lit_notes.length ? s : null;
+            });
+          };
+          const lit = await lightTarget();
+          await sleep(350);
+          const untouched = await snapshot();
+          assert(
+            untouched.transport.correct === lit.transport.correct &&
+              untouched.transport.waiting &&
+              untouched.transport.matched.length === 0,
+            "Guide output must not count as player input",
+          );
+          button("Pause").click();
+          await waitFor(
+            "pause clears guide notes",
+            async () => !(await snapshot()).lit_notes.length,
+          );
+          await sleep(100);
+          await lightTarget();
+          get<HTMLButtonElement>('button[aria-label="Stop"]').click();
+          await waitFor(
+            "stop clears guide notes",
+            async () => !(await snapshot()).lit_notes.length,
+          );
+          await sleep(100);
+          await lightTarget();
+          await navigate("Library", ".library-view");
+          // Current settings have changed; changing to another song must clear
+          // the old chord before that song opens paused.
+          const other = (await library()).find(
+            (entry) => entry.id !== first.id,
+          )!;
+          button(
+            "Practice",
+            get(`.song-row[data-song-id="${other.id}"]`),
+          ).click();
+          await waitFor("song change clears guide notes", async () => {
+            const s = await snapshot();
+            return !s.transport.playing && !s.lit_notes.length;
+          });
+          const state = await snapshot();
+          assert(
+            !state.output_error,
+            `Guide output error: ${state.output_error}`,
+          );
+          await invoke("connect_output", { id: null });
+          await invoke("connect_device", { id: null });
+          // Restore the original smoke persistence contract after the guide exercise.
+          await navigate("Library", ".library-view");
+          button(
+            "Practice",
+            get(`.song-row[data-song-id="${first.id}"]`),
+          ).click();
+          await waitFor("first arrangement restored", () =>
+            document.querySelector(
+              `.practice-view[data-song-id="${first.id}"]`,
+            ),
+          );
+          await seek(
+            Math.floor(Math.min(1000, first.duration_ms / 2) / 10) * 10,
+          );
+          return {
+            output_device_id: config.output_device_id,
+            messages_sent: state.output_messages,
+            initial_targets: lit.lit_notes,
+            physical_illumination_verified: false,
+            cleanup: [
+              "test timeout",
+              "pause",
+              "stop",
+              "song change",
+              "disconnect",
+            ],
+          };
+        },
+      );
     }
     await invoke("smoke_report", {
       report: {

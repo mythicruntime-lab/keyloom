@@ -40,8 +40,8 @@ not a claim of sample-accurate or measured physical MIDI latency.
   source already holds the pitch. This includes overlapping repeated pitches,
   chord transitions, loop restarts, and seeks. A physically held note is never
   implicitly carried into a new target. Velocity-zero note-on is a release.
-  Pedals do not generate presses. Only Physical or explicitly Simulated inputs
-  are considered; Playback input is discarded before even updating held state.
+  Pedals do not generate presses. Only Physical input is considered; Simulated
+  and Playback input is discarded before even updating engine held state.
 - Left/right part labels remain presentation metadata. The separate approximate
   pitch split can select **Both**, **Left**, or **Right** for grading within
   Practice parts: Left is below the boundary, Right includes the boundary and
@@ -101,7 +101,7 @@ indices. Seek scans the song once to reconstruct crossing voices. Metronome
 time conversion uses binary search over tempo changes. Snapshot data is bounded
 to the current target's pitches and score/state, not the complete song.
 
-Unit tests inject clock deltas and explicitly Simulated input for repeated notes,
+Unit tests inject clock deltas and synthetic events tagged Physical for repeated notes,
 chords, wrong extras, held transitions, crossing accompaniment, sustain,
 seek/pause, speed/tempo, count-in, loops, and timed misses. These are simulated
 engine checks and do not verify a Yamaha, USB adapter, native event latency, or
