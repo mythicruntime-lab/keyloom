@@ -1,0 +1,32 @@
+[package]
+name = "keyloom"
+version = "0.1.0"
+description = "An original offline Windows piano trainer"
+edition = "2021"
+license = "MIT"
+default-run = "keyloom"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.3", features = [] }
+tauri-plugin-single-instance = "=2.5.3"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+midir = "=0.11.1"
+midly = { version = "=0.5.3", default-features = false, features = ["std"] }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+sha2 = "=0.11.0"
+cpal = "=0.18.2"
+crossbeam-queue = "=0.3.14"
+rfd = "=0.17.2"
+
+[profile.release]
+opt-level = 2
+strip = true
+lto = false
+codegen-units = 2

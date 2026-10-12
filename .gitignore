@@ -1,0 +1,13 @@
+/node_modules/
+/dist/
+/target/
+/src-tauri/target/
+/.tools/
+/test-output/
+/artifacts/
+*.log
+*.sqlite*
+*.mid
+*.midi
+/src-tauri/gen/
+/.cache/
