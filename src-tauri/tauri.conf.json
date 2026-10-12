@@ -39,6 +39,7 @@
       "../LICENSE": "LICENSE",
       "../README.md": "README.md",
       "../HANDOFF.md": "HANDOFF.md",
+      "../CHANGELOG.md": "CHANGELOG.md",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../licenses/": "licenses/",
       "../docs/": "docs/"

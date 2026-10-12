@@ -1,5 +1,11 @@
 # Keyloom handoff
 
+## Current follow-up — 12 October 2026
+
+The owner requested less overlapping sound with Light Guide and clarified: "if the yamaha has the lights on keyloom stops play on notehit". Clarification is pending between releasing each guide note when its physical key is pressed and suppressing PC input-monitoring tones while guidance is enabled. Existing saved monitoring is already `yamaha` (PC key-press monitoring off). No new sound or guide behavior has been applied; 0.1.2 remains the physically verified build below. Do not mark silent illumination or the requested note-hit change verified from the earlier hardware checks.
+
+Added `CHANGELOG.md` for the existing local releases and included it in both package resource lists. The unchanged baseline passed 102 Rust test executions on 12 October (one optional benchmark ignored). Switchwall tools remain unavailable. No public push or remote is configured.
+
 ## Delivered state
 
 M0–M3 are implemented and software-verified. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. No M4–M6 features or external services were added. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.

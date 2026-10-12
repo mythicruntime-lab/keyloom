@@ -20,7 +20,7 @@ if (Test-Path -LiteralPath $destination) {
 }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 Copy-Item -LiteralPath $exe -Destination (Join-Path $destination 'Keyloom.exe')
-foreach ($file in @('LICENSE','THIRD_PARTY_NOTICES.md','README.md','HANDOFF.md')) {
+foreach ($file in @('LICENSE','THIRD_PARTY_NOTICES.md','README.md','HANDOFF.md','CHANGELOG.md')) {
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $destination
 }
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $destination -Recurse
