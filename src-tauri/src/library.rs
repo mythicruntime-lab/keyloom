@@ -354,6 +354,9 @@ fn validate_settings(settings: &SongSettings, song: &Song) -> Result<(), String>
     if !["listen", "wait", "timed"].contains(&settings.mode.as_str()) {
         return Err("Unknown practice mode.".into());
     }
+    if !["both", "left", "right"].contains(&settings.split_hand.as_str()) {
+        return Err("Choose both, left, or right for approximate pitch-split practice.".into());
+    }
     if !settings.position_ms.is_finite()
         || settings.position_ms < 0.0
         || settings.position_ms > song.duration_ms
@@ -415,7 +418,10 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 fn content_id(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn validate_id(id: &str) -> Result<(), String> {
@@ -440,8 +446,8 @@ fn entry_from_row(row: &Row<'_>) -> rusqlite::Result<LibraryEntry> {
         imported_at: row.get(6)?,
         last_played: row.get(7)?,
         duration_ms: row.get(8)?,
-        parts_count: row.get::<_,u32>(9)? as usize,
-        note_count: row.get::<_,u32>(10)? as usize,
+        parts_count: row.get::<_, u32>(9)? as usize,
+        note_count: row.get::<_, u32>(10)? as usize,
     })
 }
 

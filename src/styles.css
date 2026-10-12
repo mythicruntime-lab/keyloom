@@ -1906,6 +1906,11 @@ main {
     width: 100%;
   }
 }
+/* Import success remains visible without pushing the practice transport below
+   a normal desktop window. Match the direct banner rendered above this view. */
+main:has(> .import-banner) .practice-body {
+  height: calc(100vh - 420px);
+}
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

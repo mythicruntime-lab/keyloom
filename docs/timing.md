@@ -40,9 +40,16 @@ not a claim of sample-accurate or measured physical MIDI latency.
   implicitly carried into a new target. Velocity-zero note-on is a release.
   Pedals do not generate presses. Only Physical or explicitly Simulated inputs
   are considered; Playback input is discarded before even updating held state.
-- Left/right labels are presentation metadata. A combined part's optional pitch
-  split is an explicitly approximate display classification; it does not extract
-  a melody, transpose pitches, alter matching, or modify the canonical notes.
+- Left/right part labels remain presentation metadata. The separate approximate
+  pitch split can select **Both**, **Left**, or **Right** for grading within
+  Practice parts: Left is below the boundary, Right includes the boundary and
+  higher pitches. In Wait/Timed, the other side sounds as accompaniment and is
+  excluded from targets. Muted/Solo rules and percussion exclusion still apply.
+  Both, or no enabled boundary, grades the complete selected Practice parts.
+  Listen plays every audible part regardless of the split. This is a pitch
+  heuristic for combined material, not melody or hand extraction; it does not
+  transpose pitches or modify canonical notes. Existing saved settings default
+  to Both until the user chooses one side.
 
 ## Voice lifetime and controls
 
@@ -57,7 +64,8 @@ until it is completed, so accompaniment does not audibly lead an unanswered chor
 Pause releases scheduled voices and preserves logical voices for Play. Stop and
 seek reset audio voices. Seek rebuilds crossing voices once and starts matching
 at the first group at or after the position; earlier held notes are not targets.
-Changing parts, mode, or loop resets active voices/matching at the same position.
+Changing parts, mode, loop, or approximate split resets active voices/matching
+at the same position.
 Speed-only or display-only changes preserve the target and sounding voices;
 changing speed during count-in scales its remaining wall-time interval.
 The application also owns resets on device changes, panic, and shutdown.

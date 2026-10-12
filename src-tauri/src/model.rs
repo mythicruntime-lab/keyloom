@@ -69,6 +69,7 @@ pub struct SongSettings {
     pub loop_end_ms: Option<f64>,
     pub position_ms: f64,
     pub split_pitch: Option<u8>,
+    pub split_hand: String,
     pub count_in: bool,
     pub metronome: bool,
 }
@@ -83,6 +84,7 @@ impl Default for SongSettings {
             loop_end_ms: None,
             position_ms: 0.0,
             split_pitch: None,
+            split_hand: "both".into(),
             count_in: false,
             metronome: false,
         }
@@ -118,4 +120,18 @@ pub struct ImportResult {
     pub entry: LibraryEntry,
     pub duplicate: bool,
     pub elapsed_ms: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SongSettings;
+
+    #[test]
+    fn older_saved_settings_default_to_both_split_hands() {
+        let settings: SongSettings =
+            serde_json::from_str(r#"{"speed":0.75,"split_pitch":60}"#).unwrap();
+        assert_eq!(settings.split_hand, "both");
+        assert_eq!(settings.split_pitch, Some(60));
+        assert_eq!(settings.speed, 0.75);
+    }
 }

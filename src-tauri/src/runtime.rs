@@ -89,7 +89,6 @@ pub enum Command {
 pub struct Runtime {
     pub tx: SyncSender<Command>,
     pub status: Arc<Mutex<AppStatus>>,
-    pub session: Arc<Mutex<Option<(String, SongSettings)>>>,
 }
 impl Runtime {
     pub fn start(preferences: Preferences) -> Self {
@@ -110,11 +109,9 @@ impl Runtime {
         };
         let (tx, rx) = mpsc::sync_channel(128);
         let status = Arc::new(Mutex::new(initial));
-        let session = Arc::new(Mutex::new(None));
         let handle = Self {
             tx,
             status: status.clone(),
-            session: session.clone(),
         };
         std::thread::Builder::new().name("keyloom-transport".into()).spawn(move||{
             let (audio,audio_error)=Audio::open();let (midi_tx,midi_rx)=mpsc::sync_channel(512);let dropped=Arc::new(AtomicU64::new(0));
@@ -128,13 +125,15 @@ impl Runtime {
                 let events=worker.engine.advance(elapsed);worker.send_events(events);
                 if let Some(command)=command {match command {
                     Command::Shutdown=>break,
-                    Command::Unload(reply)=>{worker.reset();worker.current=None;worker.settings=SongSettings::default();worker.engine=Engine::new();if let Ok(mut data)=session.lock(){*data=None;}reply.send(()).ok();},
-                    Command::Checkpoint(reply)=>{let fresh=worker.checkpoint();if let Ok(mut data)=session.lock(){*data=fresh.clone();}reply.send(fresh).ok();},
+                    Command::Unload(reply)=>{worker.reset();worker.current=None;worker.settings=SongSettings::default();worker.engine=Engine::new();reply.send(()).ok();},
+                    Command::Checkpoint(reply)=>{reply.send(worker.checkpoint()).ok();},
                     Command::Load{id,song,settings}=>{worker.reset();worker.current=Some(id);worker.settings=settings.clone();worker.engine.load(song,settings);},
                     Command::Play=>worker.engine.play(),Command::Pause=>{worker.engine.pause();worker.reset();},Command::Stop=>{worker.engine.stop();worker.reset();},
                     Command::Seek(ms)=>{worker.engine.seek(ms);worker.reset();},Command::Configure(settings)=>{worker.settings=settings.clone();worker.engine.configure(settings);},
                     Command::Panic=>{worker.engine.pause();worker.reset();},
-                    Command::Preferences(p)=>{if worker.preferences.monitor!=p.monitor||worker.preferences.simulated!=p.simulated {worker.engine.pause();worker.reset();}worker.preferences=p;},
+                    // Only Connect owns device selection; a stale preferences
+                    // payload cannot relabel or disconnect an active MIDI port.
+                    Command::Preferences(mut p)=>{p.device_id=worker.preferences.device_id.clone();if worker.preferences.monitor!=p.monitor||worker.preferences.simulated!=p.simulated {worker.engine.pause();worker.reset();}worker.preferences=p;},
                     Command::Connect(id,reply)=>{let result=worker.connect(id,&midi_rx,midi_tx.clone(),dropped.clone());reply.send(result).ok();},
                     Command::Input{pitch,on,velocity}=>{if worker.preferences.simulated&&pitch<128 {worker.input(midi::Message{status:if on{0x90}else{0x80},a:pitch,b:velocity.min(127)},true);}},
                 }}
@@ -144,7 +143,6 @@ impl Runtime {
                 if checked.elapsed()>=Duration::from_secs(2) {checked=Instant::now();if worker.connection.is_some(){if let Ok(available)=midi::devices(){if !available.iter().any(|d|Some(&d.id)==worker.preferences.device_id.as_ref()){worker.connection=None;worker.engine.pause();worker.reset();worker.device_error=Some("MIDI input disconnected. Refresh and reconnect the same device.".into());}}}}
                 let pending=worker.engine.drain_events();worker.send_events(pending);
                 if published.elapsed()>=Duration::from_millis(30) {published=Instant::now();let snapshot=worker.engine.snapshot();worker.settings.position_ms=snapshot.position_ms;
-                    if let Ok(mut data)=session.lock(){*data=worker.current.clone().map(|id|(id,worker.settings.clone()));}
                     let audio_error=if worker.audio.error.load(Ordering::Acquire){Some("Windows audio device changed or failed. Restart Keyloom to reopen audio.".into())}else{worker.audio_error.clone()};
                     if let Ok(mut shared)=status.lock(){*shared=AppStatus{transport:snapshot,device_id:worker.preferences.device_id.clone(),device_name:worker.device_name.clone(),device_connected:worker.connection.is_some(),device_error:worker.device_error.clone(),audio_available:audio_error.is_none(),audio_error,audio_frames:worker.audio.frames.load(Ordering::Relaxed),audio_nonzero_frames:worker.audio.nonzero_frames.load(Ordering::Relaxed),events:worker.events.clone(),held:(0..128).filter(|p|worker.held.iter().any(|channel|channel[*p])).map(|p|p as u8).collect(),dropped_events:loss};}
                 }

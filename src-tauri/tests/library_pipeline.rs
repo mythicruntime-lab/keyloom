@@ -308,7 +308,7 @@ fn malformed_unsupported_and_extreme_files_fail_without_ready_entries() {
         ("truncated.mid", truncated, "Truncated"),
         (
             "type2.mid",
-            fixtures::smf(2, 480, &[track.clone()]),
+            fixtures::smf(2, 480, std::slice::from_ref(&track)),
             "type 2",
         ),
         ("smpte.mid", fixtures::smf(0, 0xe728, &[track]), "SMPTE"),

@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppStatus, LibraryEntry } from "./types";
+import type { AppStatus, Device, LibraryEntry } from "./types";
 
 // Explicitly opt-in native integration tests. The normal executable returns null
 // from smoke_config. No import, key injection, or test mutation runs in that case.
@@ -8,6 +8,7 @@ interface SmokeConfig {
   phase: "exercise" | "restart";
   paths: string[];
   expected_count: number;
+  device_id?: string | null;
 }
 interface Check {
   name: string;
@@ -554,6 +555,50 @@ export async function runNativeSmoke() {
           };
         },
       );
+      if (config.device_id) {
+        await check(
+          "configured native MIDI port opens, closes, and reopens; no physical cable unplug is simulated",
+          async () => {
+            const id = config.device_id!;
+            const available = await invoke<Device[]>("devices");
+            const selected = available.find((device) => device.id === id);
+            assert(
+              selected,
+              "The exact MIDI device configured for this native smoke test is not present.",
+            );
+            let cleanupRequired = false;
+            try {
+              for (let attempt = 1; attempt <= 2; attempt++) {
+                cleanupRequired = true;
+                await invoke("connect_device", { id });
+                await waitFor(`native MIDI port open ${attempt}`, async () => {
+                  const state = await snapshot();
+                  return state.device_connected && state.device_id === id;
+                });
+                await invoke("connect_device", { id: null });
+                await waitFor(`native MIDI port close ${attempt}`, async () => {
+                  const state = await snapshot();
+                  return !state.device_connected && state.device_id === null;
+                });
+                cleanupRequired = false;
+              }
+            } finally {
+              if (cleanupRequired) await invoke("connect_device", { id: null });
+            }
+            return {
+              device_id: id,
+              device_name: selected.name,
+              native_port_open_verified: true,
+              native_port_open_count: 2,
+              native_port_close_count: 2,
+              physical_keyboard_verified: false,
+              physical_cable_unplug_verified: false,
+              description:
+                "Real native input-port open/close/reopen through connect_device. This does not verify physical notes, pedal input, or cable unplug/replug behavior.",
+            };
+          },
+        );
+      }
     }
     await invoke("smoke_report", {
       report: {

@@ -49,6 +49,7 @@ export interface SongSettings {
   loop_end_ms: number | null;
   position_ms: number;
   split_pitch: number | null;
+  split_hand?: string;
   count_in: boolean;
   metronome: boolean;
 }
@@ -189,5 +190,19 @@ export function partSetting(part: Part, settings: SongSettings): PartSetting {
       volume: 0.65,
       solo: false,
     }
+  );
+}
+
+// Presentation mirrors the engine's pitch-threshold side selection. The engine
+// remains authoritative for deciding which notes are playback or player targets.
+export function isSplitAccompaniment(
+  settings: SongSettings,
+  pitch: number,
+): boolean {
+  if (settings.split_pitch === null) return false;
+  const side = settings.split_hand ?? "both";
+  return (
+    (side === "left" && pitch >= settings.split_pitch) ||
+    (side === "right" && pitch < settings.split_pitch)
   );
 }

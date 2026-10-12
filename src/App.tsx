@@ -19,6 +19,7 @@ import {
   SongSettings,
   noteName,
   partSetting,
+  isSplitAccompaniment,
   timeLabel,
 } from "./types";
 
@@ -104,12 +105,20 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [loopDraft, setLoopDraft] = useState<number | null>(null);
+  const latestSnapshot = useRef(status);
   const latest = useRef({ preferences, calibration, current, status, view });
-  latest.current = { preferences, calibration, current, status, view };
+  latest.current = {
+    preferences,
+    calibration,
+    current,
+    status: latestSnapshot.current,
+    view,
+  };
   const importQueue = useRef(Promise.resolve());
   const openQueue = useRef(Promise.resolve());
   const pendingImports = useRef(0);
   const eventHistory = useRef<MidiEvent[]>([]);
+  const refreshStatusSoon = useRef<() => void>(() => {});
   const jobId = useRef(0);
   const listGeneration = useRef(0);
   const openGeneration = useRef(0);
@@ -369,13 +378,18 @@ export default function App() {
     if (!native) return;
     let disposed = false,
       lastSequence = -1;
+    let inFlight = false;
+    let fastUntil = 0;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
+      if (inFlight || disposed) return;
+      inFlight = true;
       const start = performance.now();
       if (!document.hidden) {
         try {
           const value = await invoke<AppStatus>("status");
           if (disposed) return;
+          latestSnapshot.current = value;
           latest.current.status = value;
           setStatus((previous) => {
             const sameDevice =
@@ -386,7 +400,7 @@ export default function App() {
               previous.audio_error === value.audio_error &&
               previous.dropped_events === value.dropped_events;
             const sameKeys =
-              latest.current.view !== "practice" ||
+              latest.current.view === "library" ||
               previous.held.join(",") === value.held.join(",");
             const sameTransport =
               latest.current.view !== "practice" ||
@@ -427,18 +441,48 @@ export default function App() {
           if (!disposed) report(reason);
         }
       }
+      inFlight = false;
+      const active = latest.current;
+      const needsLiveInput =
+        active.view === "devices" ||
+        active.calibration !== null ||
+        (active.view === "practice" &&
+          (active.status.transport.playing ||
+            active.status.transport.waiting ||
+            active.status.device_connected ||
+            active.preferences.simulated));
+      const interval =
+        needsLiveInput || performance.now() < fastUntil ? 33 : 250;
       if (!disposed)
         timer = setTimeout(
           poll,
-          document.hidden ? 250 : Math.max(5, 33 - (performance.now() - start)),
+          document.hidden
+            ? 250
+            : Math.max(5, interval - (performance.now() - start)),
         );
     };
+    const wake = () => {
+      // A short burst makes Play/seek/navigation responsive without leaving an
+      // idle Library or disconnected paused roll on a permanent 30 Hz IPC loop.
+      fastUntil = performance.now() + 250;
+      if (!inFlight && !disposed) {
+        clearTimeout(timer);
+        void poll();
+      }
+    };
+    refreshStatusSoon.current = wake;
+    document.addEventListener("visibilitychange", wake);
     void poll();
     return () => {
       disposed = true;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      refreshStatusSoon.current = () => {};
     };
   }, [report]);
+  useEffect(() => {
+    refreshStatusSoon.current();
+  }, [view, calibration, preferences.simulated, preferences.device_id]);
 
   const flushSettings = useCallback(async () => {
     if (configTimer.current) {
@@ -455,6 +499,7 @@ export default function App() {
     if (!active) return;
     const settings = {
       ...active.settings,
+      split_hand: active.settings.split_hand ?? "both",
       ...patch,
       position_ms: latest.current.status.transport.position_ms,
     };
@@ -462,7 +507,9 @@ export default function App() {
     latest.current.current = next;
     setCurrent(next);
     configured.current = { id: active.entry.id, settings };
-    void invoke("control", { action: "configure", settings }).catch(report);
+    void invoke("control", { action: "configure", settings })
+      .then(() => refreshStatusSoon.current())
+      .catch(report);
     if (configTimer.current) clearTimeout(configTimer.current);
     configTimer.current = setTimeout(
       () => void flushSettings().catch(report),
@@ -473,6 +520,7 @@ export default function App() {
     try {
       await flushSettings();
       await invoke("control", { action, position_ms });
+      refreshStatusSoon.current();
     } catch (reason) {
       report(reason);
     }
@@ -526,7 +574,9 @@ export default function App() {
         event.preventDefault();
         void invoke("control", {
           action: latest.current.status.transport.playing ? "pause" : "play",
-        }).catch(report);
+        })
+          .then(() => refreshStatusSoon.current())
+          .catch(report);
         return;
       }
       const index = keys.indexOf(event.key.toLowerCase());
@@ -646,6 +696,7 @@ export default function App() {
       return (
         config?.role === "practice" &&
         (!anySolo || config.solo) &&
+        !isSplitAccompaniment(current.settings, note.pitch) &&
         (note.pitch < preferences.low || note.pitch > preferences.high)
       );
     }).length;
@@ -1367,27 +1418,50 @@ export default function App() {
                         Approximate pitch split
                       </label>
                       <p className="help-text">
-                        Colors unassigned parts around a chosen key. This is a
-                        pitch guide, not melody extraction.
+                        In practice parts, notes below the boundary become left
+                        hand; notes at or above it become right hand. This pitch
+                        threshold is an approximation, not melody extraction.
                       </p>
                       {settings.split_pitch !== null && (
-                        <label className="compact-label">
-                          Right hand begins at
-                          <select
-                            value={settings.split_pitch}
-                            onChange={(event) =>
-                              changeSettings({
-                                split_pitch: Number(event.target.value),
-                              })
-                            }
-                          >
-                            {Array.from({ length: 128 }, (_, pitch) => (
-                              <option value={pitch} key={pitch}>
-                                {noteName(pitch)} · {pitch}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <>
+                          <label className="compact-label">
+                            Right hand begins at
+                            <select
+                              value={settings.split_pitch}
+                              onChange={(event) =>
+                                changeSettings({
+                                  split_pitch: Number(event.target.value),
+                                })
+                              }
+                            >
+                              {Array.from({ length: 128 }, (_, pitch) => (
+                                <option value={pitch} key={pitch}>
+                                  {noteName(pitch)} · {pitch}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="field-label">
+                            Practice after split
+                            <select
+                              aria-label="Hands to practice after pitch split"
+                              value={settings.split_hand ?? "both"}
+                              onChange={(event) =>
+                                changeSettings({
+                                  split_hand: event.target.value,
+                                })
+                              }
+                            >
+                              <option value="both">Both hands</option>
+                              <option value="left">Left only</option>
+                              <option value="right">Right only</option>
+                            </select>
+                          </label>
+                          <p className="help-text">
+                            When practicing one side, the other side plays as
+                            gray accompaniment.
+                          </p>
+                        </>
                       )}
                     </div>
                     <div className="parts-disclaimer">

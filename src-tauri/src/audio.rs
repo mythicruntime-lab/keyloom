@@ -88,7 +88,7 @@ impl Audio {
                 .default_output_device()
                 .ok_or("No Windows audio output device")?;
             let supported = device.default_output_config().map_err(|e| e.to_string())?;
-            let config: cpal::StreamConfig = supported.clone().into();
+            let config: cpal::StreamConfig = supported.into();
             let stream = match supported.sample_format() {
                 cpal::SampleFormat::F32 => build::<f32>(
                     &device,
@@ -121,18 +121,16 @@ impl Audio {
             Ok(stream)
         })();
         match stream {
-            Ok(stream) => {
-                (
-                    Self {
-                        sender,
-                        error,
-                        frames,
-                        nonzero_frames,
-                        _stream: Some(stream),
-                    },
-                    None,
-                )
-            }
+            Ok(stream) => (
+                Self {
+                    sender,
+                    error,
+                    frames,
+                    nonzero_frames,
+                    _stream: Some(stream),
+                },
+                None,
+            ),
             Err(message) => {
                 sender.enabled.store(false, Ordering::Release);
                 (
@@ -234,6 +232,11 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                         };
                     }
                 }
+            }
+            if !voices.iter().any(|voice| voice.active) {
+                buffer.fill(T::from_sample(0.0));
+                frames.fetch_add((buffer.len() / channels) as u64, Ordering::Relaxed);
+                return;
             }
             let mut nonzero = 0_u64;
             for frame in buffer.chunks_mut(channels) {

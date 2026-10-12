@@ -7,6 +7,7 @@ import {
   SongSettings,
   noteName,
   partSetting,
+  isSplitAccompaniment,
 } from "./types";
 
 interface Props {
@@ -197,23 +198,26 @@ export default function PianoRoll(props: Props) {
           const part = partMap.get(note.part_id);
           if (part?.role === "muted" || (anySolo && !part?.solo)) return;
           const hand =
-            settings.split_pitch !== null && part?.hand === "auto"
+            settings.split_pitch !== null && part?.role === "practice"
               ? note.pitch < settings.split_pitch
                 ? "left"
                 : "right"
               : part?.hand;
-          const color =
-            part?.role === "accompaniment"
-              ? "#78899e"
-              : hand === "left"
-                ? "#f0b985"
-                : "#70d6c1";
+          const accompaniment =
+            part?.role === "accompaniment" ||
+            (part?.role === "practice" &&
+              isSplitAccompaniment(settings, note.pitch));
+          const color = accompaniment
+            ? "#78899e"
+            : hand === "left"
+              ? "#f0b985"
+              : "#70d6c1";
           const bottom = hit - (note.start_ms - position) * pixelsPerMs;
           const top = hit - (note.end_ms - position) * pixelsPerMs;
           const x = key.x + (key.black ? 1 : 2),
             w = Math.max(2, key.width - (key.black ? 2 : 4));
           context.fillStyle = color;
-          context.globalAlpha = part?.role === "accompaniment" ? 0.58 : 0.95;
+          context.globalAlpha = accompaniment ? 0.58 : 0.95;
           context.beginPath();
           context.roundRect(x, top, w, Math.max(7, bottom - top - 2), 4);
           context.fill();

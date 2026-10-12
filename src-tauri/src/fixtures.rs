@@ -31,6 +31,8 @@ pub fn demo_midi() -> Vec<u8> {
 }
 
 /// Distinct source bytes, useful for a bounded generated library benchmark.
+#[cfg(test)]
+#[allow(dead_code)] // Shared fixture module is also compiled by the binary unit harness.
 pub fn single_note(serial: u32) -> Vec<u8> {
     smf(
         0,
@@ -62,6 +64,8 @@ pub fn tempo_sustain() -> Vec<u8> {
     )
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub fn overlap_and_missing_release() -> Vec<u8> {
     smf(
         0,

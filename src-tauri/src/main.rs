@@ -8,4 +8,6 @@ mod model;
 mod parser;
 mod runtime;
 mod transport;
-fn main() { app::run(); }
+fn main() {
+    app::run();
+}
