@@ -1,5 +1,11 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppStatus, Device, LibraryEntry, Preferences } from "./types";
+import type {
+  AppStatus,
+  Device,
+  LibraryEntry,
+  OpenSong,
+  Preferences,
+} from "./types";
 
 // Explicitly opt-in native integration tests. The normal executable returns null
 // from smoke_config. No import, key injection, or test mutation runs in that case.
@@ -19,6 +25,7 @@ interface Check {
 }
 const PERSISTED_TITLE = "Keyloom smoke · persisted arrangement";
 const PERSISTED_ARTIST = "Original generated test exercise";
+const PERSISTED_VARIANT = "Keyloom smoke · practice version";
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
@@ -77,6 +84,86 @@ function setInput(input: HTMLInputElement, value: string) {
   setter.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function setSelect(select: HTMLSelectElement, value: string) {
+  assert(
+    !select.disabled,
+    `Cannot edit disabled UI select: ${select.ariaLabel}`,
+  );
+  assert(
+    [...select.options].some((option) => option.value === value),
+    `Missing option ${value} in ${select.ariaLabel}`,
+  );
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLSelectElement.prototype,
+    "value",
+  )?.set;
+  assert(setter, "Browser select value setter unavailable");
+  setter.call(select, value);
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+async function selectLesson(id: string) {
+  const select = await waitFor(`version selector includes ${id}`, () => {
+    const element = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Lesson version"]',
+    );
+    return element && [...element.options].some((option) => option.value === id)
+      ? element
+      : null;
+  });
+  if (select.value !== id) setSelect(select, id);
+  await waitFor(`lesson ${id} opened through version selector`, () =>
+    document.querySelector(`.practice-view[data-song-id="${id}"]`),
+  );
+}
+async function readOpenLesson(id: string) {
+  assert(
+    document.querySelector(`.practice-view[data-song-id="${id}"]`),
+    "Native lesson verification must match the lesson visible in the actual UI",
+  );
+  return invoke<OpenSong>("open_song", { id });
+}
+async function selectNotes(ids: number[]) {
+  for (const id of ids) {
+    const input = get<HTMLInputElement>(
+      `input[aria-label="Select note ${id}"]`,
+    );
+    if (!input.checked) input.click();
+    await waitFor(`note ${id} selected`, () => input.checked);
+  }
+  await waitFor(
+    "editor reports selected note count",
+    () =>
+      get<HTMLElement>(".lesson-edit-summary").dataset.selectedCount ===
+      String(ids.length),
+  );
+}
+async function waitRemovedCount(count: number) {
+  await waitFor(
+    `editor reports ${count} removed notes`,
+    () =>
+      document.querySelector<HTMLElement>(".lesson-edit-summary")?.dataset
+        .removedCount === String(count),
+  );
+}
+async function setKeyboardRange(low: number, high: number) {
+  const setEndpoint = async (endpoint: "low" | "high", value: number) => {
+    const label = endpoint === "low" ? "Lowest" : "Highest";
+    const select = get<HTMLSelectElement>(
+      `select[aria-label="${label} keyboard key"]`,
+    );
+    if (Number(select.value) !== value) setSelect(select, String(value));
+    await waitFor(`keyboard ${endpoint}=${value} saved`, async () => {
+      const preferences = await invoke<Preferences>("preferences");
+      return preferences[endpoint] === value && Number(select.value) === value;
+    });
+  };
+  const current = await invoke<Preferences>("preferences");
+  // Expand first so every intermediate UI preference remains a valid range.
+  if (low < current.low) await setEndpoint("low", low);
+  if (high > current.high) await setEndpoint("high", high);
+  await setEndpoint("low", low);
+  await setEndpoint("high", high);
 }
 async function library() {
   return invoke<LibraryEntry[]>("library_list", {
@@ -220,9 +307,13 @@ export async function runNativeSmoke() {
         "restart retains two canonical arrangements and edited metadata",
         async () => {
           const entries = await library();
+          const originals = entries.filter((entry) => !entry.original_id);
+          const variants = entries.filter((entry) => entry.original_id);
           assert(
-            entries.length === config.expected_count,
-            `Expected ${config.expected_count} arrangements after restart, got ${entries.length}`,
+            originals.length === config.expected_count &&
+              variants.length === 1 &&
+              variants[0].title === PERSISTED_VARIANT,
+            `Expected ${config.expected_count} original arrangements and one practice version after restart, got ${originals.length} originals and ${variants.length} versions`,
           );
           const first = entries.find(
             (entry) => entry.title === PERSISTED_TITLE,
@@ -270,10 +361,94 @@ export async function runNativeSmoke() {
           );
           return {
             library_count: entries.length,
+            original_count: originals.length,
+            practice_version_count: variants.length,
             song_id: first.id,
             saved_speed: 0.75,
             saved_mode: "wait",
             saved_position_ms: expectedPosition,
+          };
+        },
+      );
+      await check(
+        "practice version removals, independent settings and Undo survive restart",
+        async () => {
+          const entries = await library();
+          const first = entries.find(
+            (entry) => entry.title === PERSISTED_TITLE,
+          )!;
+          const variant = entries.find(
+            (entry) => entry.title === PERSISTED_VARIANT,
+          )!;
+          assert(
+            variant.original_id === first.id,
+            "Practice version lost its original link",
+          );
+          const original = await readOpenLesson(first.id);
+          const removedIds = original.song.notes
+            .slice(0, 2)
+            .map((note) => note.id);
+          await selectLesson(variant.id);
+          const saved = await readOpenLesson(variant.id);
+          assert(
+            saved.lesson?.removed_count === removedIds.length &&
+              saved.lesson.can_undo &&
+              saved.song.notes.length ===
+                original.song.notes.length - removedIds.length &&
+              saved.song.notes.every((note) => !removedIds.includes(note.id)),
+            "Saved practice version did not retain its filtered notes and Undo history",
+          );
+          const expectedPosition =
+            Math.floor(Math.min(500, original.song.duration_ms / 4) / 10) * 10;
+          assert(
+            saved.settings.speed === 0.5 &&
+              saved.settings.mode === "timed" &&
+              Math.abs(saved.settings.position_ms - expectedPosition) < 2,
+            "Practice version did not retain independent speed, mode and position",
+          );
+          await waitFor(
+            "practice version speed visible after restart",
+            () =>
+              get<HTMLInputElement>('input[aria-label="Playback speed"]')
+                .value === "50",
+          );
+          button("Edit notes").click();
+          await waitRemovedCount(removedIds.length);
+          button("Undo removal").click();
+          await waitRemovedCount(0);
+          const restored = await readOpenLesson(variant.id);
+          assert(
+            JSON.stringify(restored.song.notes) ===
+              JSON.stringify(original.song.notes) &&
+              restored.lesson &&
+              restored.lesson.revision > saved.lesson.revision,
+            "Undo after restart did not restore the original note data with a new revision",
+          );
+          button("Done editing").click();
+          await selectLesson(first.id);
+          const untouched = await readOpenLesson(first.id);
+          const expectedOriginalPosition =
+            Math.floor(Math.min(1000, first.duration_ms / 2) / 10) * 10;
+          assert(
+            JSON.stringify(untouched.song) === JSON.stringify(original.song) &&
+              untouched.settings.speed === 0.75 &&
+              untouched.settings.mode === "wait" &&
+              Math.abs(
+                untouched.settings.position_ms - expectedOriginalPosition,
+              ) < 2,
+            "Practice version Undo altered original notes or the original saved settings",
+          );
+          return {
+            original_id: first.id,
+            practice_version_id: variant.id,
+            removed_note_ids: removedIds,
+            saved_revision: saved.lesson.revision,
+            undo_revision: restored.lesson.revision,
+            saved_speed: 0.5,
+            saved_mode: "timed",
+            saved_position_ms: expectedPosition,
+            original_unchanged: true,
+            physical_keyboard_verified: false,
           };
         },
       );
@@ -624,6 +799,306 @@ export async function runNativeSmoke() {
             correct_before: waiting.transport.correct,
             correct_after: played.transport.correct,
             saved_position_ms: savedPosition,
+            physical_keyboard_verified: false,
+          };
+        },
+      );
+      await check(
+        "create, edit, compare, undo and play a saved practice version through the native UI",
+        async () => {
+          const original = await readOpenLesson(first.id);
+          assert(
+            original.song.notes.length > 2,
+            "Practice version smoke needs at least three original notes",
+          );
+          assert(
+            !original.lesson && !original.entry.original_id,
+            "Imported fixture must be an original lesson",
+          );
+          const removedIds = original.song.notes
+            .slice(0, 2)
+            .map((note) => note.id);
+          button("Save practice version").click();
+          const name = await waitFor("practice version name input", () =>
+            document.querySelector<HTMLInputElement>(
+              'input[aria-label="Practice version name"]',
+            ),
+          );
+          setInput(name, PERSISTED_VARIANT);
+          await sleep(60);
+          button("Create practice version").click();
+          const variant = await waitFor(
+            "named practice version in native library",
+            async () =>
+              (await library()).find(
+                (entry) => entry.title === PERSISTED_VARIANT,
+              ),
+          );
+          await waitFor("new version opens immediately", () =>
+            document.querySelector(
+              `.practice-view[data-song-id="${variant.id}"]`,
+            ),
+          );
+          assert(
+            variant.original_id === first.id,
+            "New practice version did not retain its source original",
+          );
+          const versions = await invoke<LibraryEntry[]>("lesson_versions", {
+            id: variant.id,
+          });
+          assert(
+            versions.length === 2 &&
+              versions.some((entry) => entry.id === first.id) &&
+              versions.some((entry) => entry.id === variant.id),
+            "Native version family must contain the original and its practice version",
+          );
+          setInput(
+            get<HTMLInputElement>('input[aria-label="Playback speed"]'),
+            "50",
+          );
+          await waitFor(
+            "independent practice version speed",
+            async () => (await snapshot()).transport.speed === 0.5,
+          );
+          button("Timed").click();
+          await waitFor(
+            "independent practice version mode",
+            async () => (await snapshot()).transport.mode === "timed",
+          );
+          // Enter editing in the same turn as Play. A Play awaiting settings
+          // must not resume the transport after the editor has paused it.
+          button("Play").click();
+          button("Edit notes").click();
+          await waitRemovedCount(0);
+          await waitFor(
+            "editor paused pending playback",
+            async () => !(await snapshot()).transport.playing,
+          );
+          const editorBefore = await snapshot();
+          const play = get<HTMLButtonElement>(".play-button");
+          assert(play.disabled, "Play must be disabled while editing notes");
+          const canvas = get<HTMLCanvasElement>(
+            "canvas.piano-roll.note-editing",
+          );
+          const rect = canvas.getBoundingClientRect();
+          const pointerErrors: string[] = [];
+          const captureError = (event: ErrorEvent) =>
+            pointerErrors.push(event.message);
+          window.addEventListener("error", captureError);
+          try {
+            play.click();
+            for (const [key, code] of [
+              [" ", "Space"],
+              ["a", "KeyA"],
+            ]) {
+              window.dispatchEvent(
+                new KeyboardEvent("keydown", { key, code, bubbles: true }),
+              );
+              window.dispatchEvent(
+                new KeyboardEvent("keyup", { key, code, bubbles: true }),
+              );
+            }
+            for (const type of ["pointerdown", "pointerup"]) {
+              canvas.dispatchEvent(
+                new PointerEvent(type, {
+                  bubbles: true,
+                  pointerId: 731,
+                  pointerType: "mouse",
+                  clientX: rect.left + rect.width / 2,
+                  clientY: rect.bottom - 4,
+                  button: 0,
+                  buttons: type === "pointerdown" ? 1 : 0,
+                }),
+              );
+            }
+            await sleep(180);
+          } finally {
+            window.removeEventListener("error", captureError);
+          }
+          const editorAfter = await snapshot();
+          assert(
+            !pointerErrors.length &&
+              !editorAfter.transport.playing &&
+              editorAfter.transport.position_ms ===
+                editorBefore.transport.position_ms &&
+              !editorAfter.events.some(
+                (event) =>
+                  event.source === "simulated" &&
+                  event.sequence >
+                    (editorBefore.events.at(-1)?.sequence ?? 0) &&
+                  event.kind === "note_on",
+              ),
+            "Editor allowed playback/simulated keys or raised a pointer error during UI input",
+          );
+          await selectNotes(removedIds);
+          button("Remove selected notes").click();
+          await waitRemovedCount(removedIds.length);
+          const edited = await readOpenLesson(variant.id);
+          assert(
+            edited.lesson?.removed_count === removedIds.length &&
+              edited.lesson.can_undo &&
+              JSON.stringify(edited.song.notes) ===
+                JSON.stringify(
+                  original.song.notes.filter(
+                    (note) => !removedIds.includes(note.id),
+                  ),
+                ),
+            "Native practice version load did not preserve exactly the unselected canonical notes",
+          );
+          button("Done editing").click();
+          await selectLesson(first.id);
+          const comparedOriginal = await readOpenLesson(first.id);
+          assert(
+            JSON.stringify(comparedOriginal.song) ===
+              JSON.stringify(original.song) &&
+              comparedOriginal.settings.speed === 0.75 &&
+              comparedOriginal.settings.mode === "wait" &&
+              Math.abs(
+                comparedOriginal.settings.position_ms -
+                  original.settings.position_ms,
+              ) < 2,
+            "Practice version editing changed the original notes or settings",
+          );
+          await selectLesson(variant.id);
+          const comparedVersion = await readOpenLesson(variant.id);
+          assert(
+            comparedVersion.settings.speed === 0.5 &&
+              comparedVersion.settings.mode === "timed",
+            "Version comparison did not restore independent settings",
+          );
+          button("Edit notes").click();
+          await waitRemovedCount(removedIds.length);
+          button("Undo removal").click();
+          await waitRemovedCount(0);
+          const restored = await readOpenLesson(variant.id);
+          assert(
+            restored.lesson &&
+              restored.lesson.revision > edited.lesson.revision &&
+              JSON.stringify(restored.song.notes) ===
+                JSON.stringify(original.song.notes),
+            "Undo did not restore all removed canonical notes",
+          );
+          await selectNotes(removedIds);
+          button("Remove selected notes").click();
+          await waitRemovedCount(removedIds.length);
+          const finalEdit = await readOpenLesson(variant.id);
+          assert(
+            finalEdit.lesson?.can_undo,
+            "Final removal must retain Undo history for the restart check",
+          );
+          button("Done editing").click();
+
+          const preferences = await invoke<Preferences>("preferences");
+          const [low, high] = finalEdit.song.notes.some(
+            (note) => note.pitch > 1,
+          )
+            ? [0, 1]
+            : [126, 127];
+          let outsideCount = 0;
+          try {
+            await navigate("Keyboard & sound", ".devices-view");
+            await setKeyboardRange(low, high);
+            await navigate("Practice", ".practice-view");
+            outsideCount = finalEdit.song.notes.filter(
+              (note) => note.pitch < low || note.pitch > high,
+            ).length;
+            assert(
+              outsideCount > 0,
+              "Narrow test keyboard range must exclude some lesson notes",
+            );
+            await waitFor(
+              "version range warning matches native note data",
+              () =>
+                document.querySelector<HTMLElement>(".lesson-range-warning")
+                  ?.dataset.outOfRangeCount === String(outsideCount),
+            );
+            button("Edit notes").click();
+            await waitRemovedCount(removedIds.length);
+            setSelect(
+              get<HTMLSelectElement>('select[aria-label="Notes to show"]'),
+              "outside",
+            );
+            const rows = await waitFor(
+              "outside-range editor filter displays notes",
+              () => {
+                const candidates = [
+                  ...document.querySelectorAll<HTMLElement>("[data-note-id]"),
+                ];
+                return candidates.length &&
+                  get<HTMLSelectElement>('select[aria-label="Notes to show"]')
+                    .value === "outside" &&
+                  candidates.every((row) => {
+                    const note = finalEdit.song.notes.find(
+                      (item) => item.id === Number(row.dataset.noteId),
+                    );
+                    return note && (note.pitch < low || note.pitch > high);
+                  })
+                  ? candidates
+                  : null;
+              },
+            );
+            assert(
+              rows.every((row) => {
+                const note = finalEdit.song.notes.find(
+                  (item) => item.id === Number(row.dataset.noteId),
+                );
+                return note && (note.pitch < low || note.pitch > high);
+              }),
+              "Outside-range editor filter included an in-range note",
+            );
+            button("Done editing").click();
+          } finally {
+            await navigate("Keyboard & sound", ".devices-view");
+            await setKeyboardRange(preferences.low, preferences.high);
+            await navigate("Practice", ".practice-view");
+          }
+          button("Restart").click();
+          await waitFor(
+            "edited version playback starts from zero",
+            async () => (await snapshot()).transport.position_ms === 0,
+          );
+          button("Play").click();
+          await waitFor(
+            "edited native lesson is playable",
+            async () => (await snapshot()).transport.position_ms > 60,
+          );
+          button("Pause").click();
+          await waitFor(
+            "edited lesson pauses",
+            async () => !(await snapshot()).transport.playing,
+          );
+          const variantPosition =
+            Math.floor(Math.min(500, original.song.duration_ms / 4) / 10) * 10;
+          await seek(variantPosition);
+          await selectLesson(first.id);
+          const finalOriginal = await readOpenLesson(first.id);
+          assert(
+            JSON.stringify(finalOriginal.song) ===
+              JSON.stringify(original.song) &&
+              JSON.stringify(finalOriginal.settings) ===
+                JSON.stringify(original.settings),
+            "Returning from practice version did not preserve the original lesson and settings",
+          );
+          const entries = await library();
+          assert(
+            entries.length === config.expected_count + 1,
+            "Practice version should add exactly one library entry",
+          );
+          return {
+            original_id: first.id,
+            practice_version_id: variant.id,
+            removed_note_ids: removedIds,
+            original_note_count: original.song.notes.length,
+            practice_note_count: finalEdit.song.notes.length,
+            persisted_revision: finalEdit.lesson.revision,
+            outside_keyboard_count: outsideCount,
+            saved_speed: 0.5,
+            saved_mode: "timed",
+            saved_position_ms: variantPosition,
+            original_unchanged: true,
+            keyboard_range_restored: true,
+            editor_play_and_simulated_input_blocked: true,
+            pending_play_did_not_escape_editor_pause: true,
             physical_keyboard_verified: false,
           };
         },

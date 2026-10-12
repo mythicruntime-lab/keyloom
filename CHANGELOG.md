@@ -2,6 +2,13 @@
 
 User-visible changes to Keyloom are recorded here. Version dates refer to local releases; no public release is implied.
 
+## 0.2.0 — 2026-10-12
+
+- Added named practice versions that preserve the imported original and keep independent practice settings.
+- Added note selection/removal and saved Undo history, plus switching between originals and practice versions.
+- Added editor range warnings and an accessible note list for selecting notes outside the displayed keyboard range.
+- Protected originals with dependent practice versions from removal. Edited MIDI export and further note transformations remain deferred.
+
 ## 0.1.3 — 2026-10-12
 
 - Light Guide now mutes Keyloom's PC audio, including key-press tones, accompaniment/Listen playback, count-in and metronome. Turn Light Guide off to restore PC audio; the chosen listening preference is retained.

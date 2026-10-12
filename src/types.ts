@@ -55,6 +55,7 @@ export interface SongSettings {
 }
 export interface LibraryEntry {
   id: string;
+  original_id?: string | null;
   title: string;
   artist: string;
   tags: string;
@@ -83,10 +84,16 @@ export interface ImportJob {
   result?: ImportResult;
   error?: string;
 }
+export interface LessonState {
+  revision: number;
+  can_undo: boolean;
+  removed_count: number;
+}
 export interface OpenSong {
   entry: LibraryEntry;
   song: Song;
   settings: SongSettings;
+  lesson?: LessonState | null;
 }
 export interface Device {
   id: string;

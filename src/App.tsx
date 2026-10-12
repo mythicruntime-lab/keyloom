@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import PianoRoll from "./PianoRoll";
+import LessonEditor from "./LessonEditor";
 import {
   AppStatus,
   DEFAULT_PREFERENCES,
@@ -109,14 +110,33 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [loopDraft, setLoopDraft] = useState<number | null>(null);
+  const [versions, setVersions] = useState<LibraryEntry[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [lessonBusy, setLessonBusy] = useState(false);
+  const [openingSong, setOpeningSong] = useState(false);
+  const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
+  const [variantDraft, setVariantDraft] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const lessonBusyRef = useRef(false);
+  const openingSongRef = useRef(false);
   const latestSnapshot = useRef(status);
-  const latest = useRef({ preferences, calibration, current, status, view });
+  const latest = useRef({
+    preferences,
+    calibration,
+    current,
+    status,
+    view,
+    editing,
+  });
   latest.current = {
     preferences,
     calibration,
     current,
     status: latestSnapshot.current,
     view,
+    editing,
   };
   const importQueue = useRef(Promise.resolve());
   const openQueue = useRef(Promise.resolve());
@@ -138,15 +158,17 @@ export default function App() {
     if (view === "devices") setEvents(eventHistory.current);
   }, [view]);
   useEffect(() => {
-    if (!metadata && !removing) return;
+    if (!metadata && !removing && !variantDraft) return;
     const prior =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (lessonBusyRef.current) return;
         setMetadata(null);
         setRemoving(null);
+        setVariantDraft(null);
         return;
       }
       if (event.key !== "Tab") return;
@@ -170,7 +192,32 @@ export default function App() {
       document.removeEventListener("keydown", keydown);
       prior?.focus();
     };
-  }, [!!metadata, !!removing]);
+  }, [!!metadata, !!removing, !!variantDraft]);
+  useEffect(() => {
+    setSelectedNotes(new Set());
+  }, [current?.entry.id, current?.lesson?.revision]);
+  useEffect(() => {
+    const id = current?.entry.id;
+    if (!native || !id) {
+      setVersions([]);
+      return;
+    }
+    let cancelled = false;
+    void invoke<LibraryEntry[]>("lesson_versions", { id })
+      .then((value) => {
+        if (!cancelled && latest.current.current?.entry.id === id)
+          setVersions(value);
+      })
+      .catch(report);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    current?.entry.id,
+    current?.entry.title,
+    current?.lesson?.revision,
+    report,
+  ]);
 
   const reload = useCallback(async () => {
     if (!native) {
@@ -524,6 +571,12 @@ export default function App() {
     await invoke("save_settings", { id: value.id, settings: value.settings });
   }, []);
   const changeSettings = (patch: Partial<SongSettings>) => {
+    if (
+      lessonBusyRef.current ||
+      latest.current.editing ||
+      openingSongRef.current
+    )
+      return;
     const active = latest.current.current;
     if (!active) return;
     const settings = {
@@ -546,8 +599,24 @@ export default function App() {
     );
   };
   const control = async (action: string, position_ms?: number) => {
+    const generation = openGeneration.current;
+    const songId = latest.current.current?.entry.id;
+    if (
+      lessonBusyRef.current ||
+      openingSongRef.current ||
+      (latest.current.editing && !["seek", "pause", "panic"].includes(action))
+    )
+      return;
     try {
       await flushSettings();
+      if (
+        generation !== openGeneration.current ||
+        latest.current.current?.entry.id !== songId ||
+        lessonBusyRef.current ||
+        openingSongRef.current ||
+        (latest.current.editing && !["seek", "pause", "panic"].includes(action))
+      )
+        return;
       await invoke("control", { action, position_ms });
       refreshStatusSoon.current();
     } catch (reason) {
@@ -555,6 +624,12 @@ export default function App() {
     }
   };
   const openSong = (id: string) => {
+    if (lessonBusyRef.current) return Promise.resolve();
+    openingSongRef.current = true;
+    setOpeningSong(true);
+    setEditing(false);
+    latest.current.editing = false;
+    setSelectedNotes(new Set());
     const generation = ++openGeneration.current;
     const work = async () => {
       try {
@@ -564,20 +639,177 @@ export default function App() {
         if (generation !== openGeneration.current) return;
         latest.current.current = result;
         setCurrent(result);
+        setVersions([result.entry]);
         setView("practice");
         setLoopDraft(null);
         setSeekValue(null);
         await reloadRef.current();
       } catch (reason) {
         report(reason);
+      } finally {
+        if (generation === openGeneration.current) {
+          openingSongRef.current = false;
+          setOpeningSong(false);
+        }
       }
     };
     openQueue.current = openQueue.current.then(work, work);
     return openQueue.current;
   };
+  const beginEditing = async () => {
+    const active = latest.current.current;
+    if (
+      !active?.entry.original_id ||
+      !active.lesson ||
+      lessonBusyRef.current ||
+      openingSongRef.current
+    )
+      return;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    const generation = openGeneration.current;
+    try {
+      await flushSettings();
+      await invoke("control", { action: "pause" });
+      if (
+        openGeneration.current === generation &&
+        latest.current.current?.entry.id === active.entry.id
+      ) {
+        latest.current.editing = true;
+        setEditing(true);
+        setSelectedNotes(new Set());
+        refreshStatusSoon.current();
+      }
+    } catch (reason) {
+      report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+    }
+  };
+  const updateLesson = async (action: "remove_notes" | "undo_notes") => {
+    const active = latest.current.current;
+    if (
+      !active?.entry.original_id ||
+      !active.lesson ||
+      lessonBusyRef.current ||
+      openingSongRef.current ||
+      !latest.current.editing
+    )
+      return;
+    if (action === "remove_notes" && !selectedNotes.size) return;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    const generation = openGeneration.current;
+    try {
+      await flushSettings();
+      const result = await invoke<OpenSong>(action, {
+        id: active.entry.id,
+        expected_revision: active.lesson.revision,
+        ...(action === "remove_notes" ? { note_ids: [...selectedNotes] } : {}),
+      });
+      if (
+        openGeneration.current === generation &&
+        latest.current.current?.entry.id === active.entry.id
+      ) {
+        latest.current.current = result;
+        setCurrent(result);
+        setSelectedNotes(new Set());
+        setSeekValue(null);
+        refreshStatusSoon.current();
+      }
+      await reloadRef.current();
+    } catch (reason) {
+      // A saved edit may have committed even if reopening the native song failed.
+      // Leave stale revisions behind and keep the saved library entry discoverable.
+      ++openGeneration.current;
+      latest.current.current = null;
+      latest.current.editing = false;
+      setCurrent(null);
+      setEditing(false);
+      setSelectedNotes(new Set());
+      setView("library");
+      setQuery("");
+      setFavorites(false);
+      await reloadRef.current();
+      report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+    }
+  };
+  const createVariant = async () => {
+    const draft = variantDraft;
+    if (
+      !draft?.title.trim() ||
+      lessonBusyRef.current ||
+      openingSongRef.current ||
+      latest.current.current?.entry.id !== draft.id
+    )
+      return;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    const generation = openGeneration.current;
+    try {
+      await flushSettings();
+      const result = await invoke<OpenSong>("create_variant", {
+        id: draft.id,
+        title: draft.title.trim(),
+      });
+      if (
+        openGeneration.current === generation &&
+        latest.current.current?.entry.id === draft.id
+      ) {
+        latest.current.current = result;
+        latest.current.editing = false;
+        setCurrent(result);
+        setEditing(false);
+        setVersions([result.entry]);
+        setSelectedNotes(new Set());
+        setVariantDraft(null);
+        setView("practice");
+        setSeekValue(null);
+        setLoopDraft(null);
+        refreshStatusSoon.current();
+      }
+      await reloadRef.current();
+    } catch (reason) {
+      ++openGeneration.current;
+      latest.current.current = null;
+      latest.current.editing = false;
+      setCurrent(null);
+      setEditing(false);
+      setVariantDraft(null);
+      setSelectedNotes(new Set());
+      setView("library");
+      setQuery("");
+      setFavorites(false);
+      await reloadRef.current();
+      report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+    }
+  };
+  const toggleSelectedNote = (id: number) => {
+    if (lessonBusyRef.current) return;
+    setSelectedNotes((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const inputNote = useCallback(
     (pitch: number, on: boolean) => {
       if (!native || !latest.current.preferences.simulated) return;
+      if (
+        on &&
+        (latest.current.editing ||
+          lessonBusyRef.current ||
+          openingSongRef.current)
+      )
+        return;
       void invoke("input_note", { pitch, on, velocity: on ? 90 : 0 }).catch(
         report,
       );
@@ -589,6 +821,10 @@ export default function App() {
     const keys = "awsedftgyhujkolp;";
     const keyDown = (event: KeyboardEvent) => {
       if (
+        latest.current.editing ||
+        lessonBusyRef.current ||
+        openingSongRef.current ||
+        document.querySelector(".modal") ||
         event.repeat ||
         event.ctrlKey ||
         event.altKey ||
@@ -655,6 +891,8 @@ export default function App() {
       await invoke("remove_song", { id: removing.id, confirmed: true });
       if (current?.entry.id === removing.id) {
         setCurrent(null);
+        setEditing(false);
+        setSelectedNotes(new Set());
         setView("library");
       }
       setRemoving(null);
@@ -772,10 +1010,38 @@ export default function App() {
     outputSelection ??
     preferences.output_device_id ??
     (matchingOutputs.length === 1 ? matchingOutputs[0].id : "");
+  const rangeWarningCount = useMemo(
+    () =>
+      current?.entry.original_id
+        ? current.song.notes.filter(
+            (note) =>
+              note.pitch < preferences.low || note.pitch > preferences.high,
+          ).length
+        : outOfRange,
+    [
+      current?.entry.original_id,
+      current?.song,
+      preferences.low,
+      preferences.high,
+      outOfRange,
+    ],
+  );
+  const hasModal = !!metadata || !!removing || !!variantDraft;
+  const familyVersions = current
+    ? versions.filter(
+        (entry) =>
+          (entry.original_id || entry.id) ===
+          (current.entry.original_id || current.entry.id),
+      )
+    : [];
+  const versionOptions =
+    current && !familyVersions.some((entry) => entry.id === current.entry.id)
+      ? [...familyVersions, current.entry]
+      : familyVersions;
 
   return (
     <div className={`app-shell ${isFullscreen ? "fullscreen" : ""}`}>
-      <aside className="sidebar" inert={!!metadata || !!removing}>
+      <aside className="sidebar" inert={hasModal || lessonBusy}>
         <div className="brand">
           <span className="brand-mark">
             <i />
@@ -851,7 +1117,7 @@ export default function App() {
           </div>
         </div>
       </aside>
-      <main inert={!!metadata || !!removing}>
+      <main inert={hasModal || lessonBusy} aria-busy={lessonBusy}>
         {!native && (
           <div className="preview-banner">
             Disconnected browser preview — imports, audio, and MIDI require the
@@ -1138,6 +1404,11 @@ export default function App() {
                         >
                           {entry.title}
                         </button>
+                        <span
+                          className={`version-badge ${entry.original_id ? "variant" : ""}`}
+                        >
+                          {entry.original_id ? "Practice version" : "Original"}
+                        </span>
                         <p>
                           {entry.artist || "Artist not set"}
                           {entry.arrangement && <> · {entry.arrangement}</>}
@@ -1234,7 +1505,10 @@ export default function App() {
               </div>
             </section>
           ) : (
-            <section className="practice-view" data-song-id={current.entry.id}>
+            <section
+              className={`practice-view ${editing ? "is-editing" : ""}`}
+              data-song-id={current.entry.id}
+            >
               <header className="practice-header">
                 <div>
                   <button
@@ -1293,7 +1567,64 @@ export default function App() {
                   </button>
                 </div>
               </header>
-              <div className="practice-options">
+              <div className="lesson-version-bar">
+                <label className="lesson-version-select">
+                  Lesson version
+                  <select
+                    aria-label="Lesson version"
+                    value={current.entry.id}
+                    disabled={lessonBusy || openingSong}
+                    onChange={(event) => void openSong(event.target.value)}
+                  >
+                    {versionOptions.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.original_id ? "Practice version" : "Original"} ·{" "}
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="lesson-version-detail">
+                  {openingSong
+                    ? "Opening version…"
+                    : lessonBusy
+                      ? "Saving changes…"
+                      : current.entry.original_id
+                        ? `${current.lesson?.removed_count ?? 0} notes removed · original preserved`
+                        : "Original MIDI · unchanged"}
+                </span>
+                <div className="button-row">
+                  <button
+                    className="small-button"
+                    disabled={lessonBusy || openingSong || editing}
+                    onClick={() => {
+                      setError("");
+                      void control("pause");
+                      setVariantDraft({
+                        id: current.entry.id,
+                        title: `${current.entry.title} – practice`,
+                      });
+                    }}
+                  >
+                    Save practice version
+                  </button>
+                  {current.entry.original_id && (
+                    <button
+                      className={`small-button ${editing ? "selected" : ""}`}
+                      disabled={
+                        lessonBusy || openingSong || editing || !current.lesson
+                      }
+                      onClick={() => void beginEditing()}
+                    >
+                      Edit notes
+                    </button>
+                  )}
+                </div>
+              </div>
+              <fieldset
+                className="practice-options"
+                disabled={editing || lessonBusy || openingSong}
+              >
                 <div className="mode-switch" aria-label="Practice mode">
                   {[
                     ["listen", "Listen"],
@@ -1335,11 +1666,18 @@ export default function App() {
                     ? status.device_name
                     : "No physical MIDI input"}
                 </span>
-              </div>
-              {outOfRange > 0 && (
-                <div className="inline-warning">
-                  {outOfRange} practice notes fall outside{" "}
-                  {noteName(preferences.low)}–{noteName(preferences.high)}.{" "}
+              </fieldset>
+              {rangeWarningCount > 0 && (
+                <div
+                  className="inline-warning lesson-range-warning"
+                  data-out-of-range-count={rangeWarningCount}
+                >
+                  {rangeWarningCount}{" "}
+                  {current.entry.original_id
+                    ? "notes in this version"
+                    : "practice notes"}{" "}
+                  fall outside {noteName(preferences.low)}–
+                  {noteName(preferences.high)}.{" "}
                   <button
                     className="text-button"
                     onClick={() => setView("devices")}
@@ -1355,7 +1693,7 @@ export default function App() {
                   targets.
                 </div>
               )}
-              {preferences.simulated && (
+              {preferences.simulated && !editing && (
                 <div className="simulation-notice">
                   SIMULATED MONITORING · Click keys or use A W S E D F T G Y H U
                   J K O L P ; (C4–E5). Test notes cannot satisfy practice
@@ -1389,20 +1727,25 @@ export default function App() {
                     status={status}
                     preferences={preferences}
                     onNote={inputNote}
+                    editing={editing}
+                    selectedNotes={selectedNotes}
+                    onToggleNote={toggleSelectedNote}
                   />
                   <div
                     className={`practice-feedback ${status.transport.waiting ? "waiting" : ""}`}
                     aria-live="polite"
                   >
                     <span>
-                      {status.transport.count_in_remaining > 0
-                        ? `Count in · ${status.transport.count_in_remaining}`
-                        : status.transport.waiting
-                          ? `Your turn · ${currentTargets.map((pitch) => noteName(pitch, preferences.note_numbers)).join(" + ") || "release and press the next notes"}`
-                          : status.transport.feedback ||
-                            (status.transport.playing
-                              ? "Follow the notes to the light line"
-                              : "Ready at your own pace")}
+                      {editing
+                        ? "Editing paused · click notes to select; seek to inspect another segment"
+                        : status.transport.count_in_remaining > 0
+                          ? `Count in · ${status.transport.count_in_remaining}`
+                          : status.transport.waiting
+                            ? `Your turn · ${currentTargets.map((pitch) => noteName(pitch, preferences.note_numbers)).join(" + ") || "release and press the next notes"}`
+                            : status.transport.feedback ||
+                              (status.transport.playing
+                                ? "Follow the notes to the light line"
+                                : "Ready at your own pace")}
                     </span>
                     <span>
                       {settings.mode !== "listen" && (
@@ -1415,155 +1758,188 @@ export default function App() {
                     </span>
                   </div>
                 </div>
-                {showParts && (
-                  <aside className="parts-panel">
-                    <div className="section-heading">
-                      <h2>Make it your own</h2>
-                      <span>{current.song.parts.length} parts</span>
-                    </div>
-                    <p className="help-text">
-                      Choose what to practice. Gray accompaniment plays along.
-                    </p>
-                    {current.song.parts.map((part) => {
-                      const config = partSetting(part, settings);
-                      const update = (patch: Partial<PartSetting>) =>
-                        changeSettings({
-                          parts: [
-                            ...settings.parts.filter(
-                              (item) => item.part_id !== part.id,
-                            ),
-                            { ...config, ...patch },
-                          ],
-                        });
-                      return (
-                        <div className="part-card" key={part.id}>
-                          <div className="part-title">
-                            <span>
-                              {part.name || `Track ${part.track + 1}`}
-                            </span>
-                            <small>
-                              CH {part.channel + 1}
-                              {part.percussion ? " · DRUMS" : ""}
-                            </small>
-                          </div>
-                          <select
-                            aria-label={`Role for ${part.name}`}
-                            value={config.role}
-                            onChange={(event) =>
-                              update({ role: event.target.value })
-                            }
-                          >
-                            <option value="practice" disabled={part.percussion}>
-                              Practice
-                            </option>
-                            <option value="accompaniment">Accompaniment</option>
-                            <option value="muted">Muted</option>
-                          </select>
-                          <div className="part-controls">
-                            <select
-                              aria-label={`Hand for ${part.name}`}
-                              value={config.hand}
-                              disabled={config.role !== "practice"}
-                              onChange={(event) =>
-                                update({ hand: event.target.value })
-                              }
-                            >
-                              <option value="auto">Unassigned</option>
-                              <option value="left">Left hand</option>
-                              <option value="right">Right hand</option>
-                            </select>
-                            <button
-                              className={`solo-button ${config.solo ? "selected" : ""}`}
-                              aria-pressed={config.solo}
-                              onClick={() => update({ solo: !config.solo })}
-                            >
-                              Solo
-                            </button>
-                          </div>
-                          <label className="volume">
-                            <span>Volume</span>
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={Math.round(config.volume * 100)}
-                              aria-label={`Volume for ${part.name}`}
-                              onChange={(event) =>
-                                update({
-                                  volume: Number(event.target.value) / 100,
-                                })
-                              }
-                            />
-                            <small>{Math.round(config.volume * 100)}</small>
-                          </label>
-                        </div>
-                      );
-                    })}
-                    <div className="split-settings">
-                      <label className="check">
-                        <input
-                          type="checkbox"
-                          checked={settings.split_pitch !== null}
-                          onChange={(event) =>
-                            changeSettings({
-                              split_pitch: event.target.checked ? 60 : null,
-                            })
-                          }
-                        />
-                        Approximate pitch split
-                      </label>
+                {editing && current.lesson ? (
+                  <LessonEditor
+                    key={current.entry.id}
+                    song={current.song}
+                    lesson={current.lesson}
+                    preferences={preferences}
+                    selected={selectedNotes}
+                    position={status.transport.position_ms}
+                    saving={lessonBusy}
+                    onToggle={toggleSelectedNote}
+                    onSelect={(ids) =>
+                      setSelectedNotes(
+                        (previous) => new Set([...previous, ...ids]),
+                      )
+                    }
+                    onClear={() => setSelectedNotes(new Set())}
+                    onSeek={(ms) => void control("seek", ms)}
+                    onRemove={() => void updateLesson("remove_notes")}
+                    onUndo={() => void updateLesson("undo_notes")}
+                    onDone={() => {
+                      setEditing(false);
+                      latest.current.editing = false;
+                      setSelectedNotes(new Set());
+                    }}
+                  />
+                ) : (
+                  showParts && (
+                    <aside className="parts-panel" inert={openingSong}>
+                      <div className="section-heading">
+                        <h2>Make it your own</h2>
+                        <span>{current.song.parts.length} parts</span>
+                      </div>
                       <p className="help-text">
-                        In practice parts, notes below the boundary become left
-                        hand; notes at or above it become right hand. This pitch
-                        threshold is an approximation, not melody extraction.
+                        Choose what to practice. Gray accompaniment plays along.
                       </p>
-                      {settings.split_pitch !== null && (
-                        <>
-                          <label className="compact-label">
-                            Right hand begins at
+                      {current.song.parts.map((part) => {
+                        const config = partSetting(part, settings);
+                        const update = (patch: Partial<PartSetting>) =>
+                          changeSettings({
+                            parts: [
+                              ...settings.parts.filter(
+                                (item) => item.part_id !== part.id,
+                              ),
+                              { ...config, ...patch },
+                            ],
+                          });
+                        return (
+                          <div className="part-card" key={part.id}>
+                            <div className="part-title">
+                              <span>
+                                {part.name || `Track ${part.track + 1}`}
+                              </span>
+                              <small>
+                                CH {part.channel + 1}
+                                {part.percussion ? " · DRUMS" : ""}
+                              </small>
+                            </div>
                             <select
-                              value={settings.split_pitch}
+                              aria-label={`Role for ${part.name}`}
+                              value={config.role}
                               onChange={(event) =>
-                                changeSettings({
-                                  split_pitch: Number(event.target.value),
-                                })
+                                update({ role: event.target.value })
                               }
                             >
-                              {Array.from({ length: 128 }, (_, pitch) => (
-                                <option value={pitch} key={pitch}>
-                                  {noteName(pitch)} · {pitch}
-                                </option>
-                              ))}
+                              <option
+                                value="practice"
+                                disabled={part.percussion}
+                              >
+                                Practice
+                              </option>
+                              <option value="accompaniment">
+                                Accompaniment
+                              </option>
+                              <option value="muted">Muted</option>
                             </select>
-                          </label>
-                          <label className="field-label">
-                            Practice after split
-                            <select
-                              aria-label="Hands to practice after pitch split"
-                              value={settings.split_hand ?? "both"}
-                              onChange={(event) =>
-                                changeSettings({
-                                  split_hand: event.target.value,
-                                })
-                              }
-                            >
-                              <option value="both">Both hands</option>
-                              <option value="left">Left only</option>
-                              <option value="right">Right only</option>
-                            </select>
-                          </label>
-                          <p className="help-text">
-                            When practicing one side, the other side plays as
-                            gray accompaniment.
-                          </p>
-                        </>
-                      )}
-                    </div>
-                    <div className="parts-disclaimer">
-                      Basic practice tone. Instrument programs and arbitrary
-                      SysEx are not reproduced.
-                    </div>
-                  </aside>
+                            <div className="part-controls">
+                              <select
+                                aria-label={`Hand for ${part.name}`}
+                                value={config.hand}
+                                disabled={config.role !== "practice"}
+                                onChange={(event) =>
+                                  update({ hand: event.target.value })
+                                }
+                              >
+                                <option value="auto">Unassigned</option>
+                                <option value="left">Left hand</option>
+                                <option value="right">Right hand</option>
+                              </select>
+                              <button
+                                className={`solo-button ${config.solo ? "selected" : ""}`}
+                                aria-pressed={config.solo}
+                                onClick={() => update({ solo: !config.solo })}
+                              >
+                                Solo
+                              </button>
+                            </div>
+                            <label className="volume">
+                              <span>Volume</span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={Math.round(config.volume * 100)}
+                                aria-label={`Volume for ${part.name}`}
+                                onChange={(event) =>
+                                  update({
+                                    volume: Number(event.target.value) / 100,
+                                  })
+                                }
+                              />
+                              <small>{Math.round(config.volume * 100)}</small>
+                            </label>
+                          </div>
+                        );
+                      })}
+                      <div className="split-settings">
+                        <label className="check">
+                          <input
+                            type="checkbox"
+                            checked={settings.split_pitch !== null}
+                            onChange={(event) =>
+                              changeSettings({
+                                split_pitch: event.target.checked ? 60 : null,
+                              })
+                            }
+                          />
+                          Approximate pitch split
+                        </label>
+                        <p className="help-text">
+                          In practice parts, notes below the boundary become
+                          left hand; notes at or above it become right hand.
+                          This pitch threshold is an approximation, not melody
+                          extraction.
+                        </p>
+                        {settings.split_pitch !== null && (
+                          <>
+                            <label className="compact-label">
+                              Right hand begins at
+                              <select
+                                value={settings.split_pitch}
+                                onChange={(event) =>
+                                  changeSettings({
+                                    split_pitch: Number(event.target.value),
+                                  })
+                                }
+                              >
+                                {Array.from({ length: 128 }, (_, pitch) => (
+                                  <option value={pitch} key={pitch}>
+                                    {noteName(pitch)} · {pitch}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="field-label">
+                              Practice after split
+                              <select
+                                aria-label="Hands to practice after pitch split"
+                                value={settings.split_hand ?? "both"}
+                                onChange={(event) =>
+                                  changeSettings({
+                                    split_hand: event.target.value,
+                                  })
+                                }
+                              >
+                                <option value="both">Both hands</option>
+                                <option value="left">Left only</option>
+                                <option value="right">Right only</option>
+                              </select>
+                            </label>
+                            <p className="help-text">
+                              When practicing one side, the other side plays as
+                              gray accompaniment.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      <div className="parts-disclaimer">
+                        Basic practice tone. Instrument programs and arbitrary
+                        SysEx are not reproduced.
+                      </div>
+                    </aside>
+                  )
                 )}
               </div>
               <div className="transport">
@@ -1600,12 +1976,14 @@ export default function App() {
                       className="icon-button"
                       title="Stop and return to beginning"
                       aria-label="Stop"
+                      disabled={editing || lessonBusy || openingSong}
                       onClick={() => void control("stop")}
                     >
                       <Icon name="stop" size={17} />
                     </button>
                     <button
                       className="button primary play-button"
+                      disabled={editing || lessonBusy || openingSong}
                       onClick={() =>
                         void control(
                           status.transport.playing ? "pause" : "play",
@@ -1625,7 +2003,10 @@ export default function App() {
                       Restart
                     </button>
                   </div>
-                  <div className="loop-controls">
+                  <fieldset
+                    className="loop-controls"
+                    disabled={editing || lessonBusy || openingSong}
+                  >
                     <button
                       className={`small-button ${loopDraft !== null ? "selected" : ""}`}
                       onClick={setLoop}
@@ -1657,8 +2038,11 @@ export default function App() {
                         <Icon name="close" size={14} />
                       </button>
                     )}
-                  </div>
-                  <div className="button-row transport-checks">
+                  </fieldset>
+                  <fieldset
+                    className="button-row transport-checks"
+                    disabled={editing || lessonBusy || openingSong}
+                  >
                     <label className="check">
                       <input
                         type="checkbox"
@@ -1685,7 +2069,7 @@ export default function App() {
                     >
                       Panic
                     </button>
-                  </div>
+                  </fieldset>
                 </div>
               </div>
               {!!current.song.warnings.length && (
@@ -2201,6 +2585,89 @@ export default function App() {
           </div>
         </div>
       )}
+      {variantDraft && (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!lessonBusyRef.current) setVariantDraft(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="variant-title"
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="card-title">
+              <h2 id="variant-title">Save practice version</h2>
+              <button
+                className="icon-button"
+                aria-label="Close practice version dialog"
+                disabled={lessonBusy}
+                onClick={() => setVariantDraft(null)}
+              >
+                <Icon name="close" />
+              </button>
+            </div>
+            <p className="help-text">
+              Keep a named copy to practice and remove notes from. Your original
+              MIDI and other versions stay unchanged.
+            </p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createVariant();
+              }}
+            >
+              <label className="field-label">
+                Practice version name
+                <input
+                  aria-label="Practice version name"
+                  autoFocus
+                  required
+                  maxLength={500}
+                  value={variantDraft.title}
+                  disabled={lessonBusy}
+                  onChange={(event) =>
+                    setVariantDraft({
+                      ...variantDraft,
+                      title: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              {error && (
+                <p className="inline-warning" role="alert">
+                  {error}
+                </p>
+              )}
+              {lessonBusy && (
+                <p className="help-text" role="status">
+                  Saving your practice version…
+                </p>
+              )}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={lessonBusy}
+                  onClick={() => setVariantDraft(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={lessonBusy || !variantDraft.title.trim()}
+                >
+                  Create practice version
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       {metadata && (
         <div className="modal-backdrop" onClick={() => setMetadata(null)}>
           <section
@@ -2264,18 +2731,26 @@ export default function App() {
                 />
                 Favorite this arrangement
               </label>
+              {metadata.original_id && (
+                <p className="help-text">
+                  MIDI export for practice versions is not available yet. Switch
+                  to the original to export the unchanged MIDI.
+                </p>
+              )}
               <div className="modal-actions">
-                <button
-                  type="button"
-                  className="small-button"
-                  onClick={() => {
-                    void invoke("export_song", { id: metadata.id }).catch(
-                      report,
-                    );
-                  }}
-                >
-                  Export MIDI
-                </button>
+                {!metadata.original_id && (
+                  <button
+                    type="button"
+                    className="small-button"
+                    onClick={() => {
+                      void invoke("export_song", { id: metadata.id }).catch(
+                        report,
+                      );
+                    }}
+                  >
+                    Export MIDI
+                  </button>
+                )}
                 <button
                   type="button"
                   className="text-danger"
@@ -2302,14 +2777,28 @@ export default function App() {
             aria-labelledby="remove-title"
             className="modal"
           >
-            <h2 id="remove-title">Remove this managed copy?</h2>
+            <h2 id="remove-title">
+              {removing.original_id
+                ? "Remove this practice version?"
+                : "Remove this managed copy?"}
+            </h2>
             <p>
-              “{removing.title}” and its saved practice settings will be removed
-              from Keyloom’s library.
+              “{removing.title}” and its saved practice settings
+              {removing.original_id
+                ? ", including its note removals,"
+                : ""}{" "}
+              will be removed from Keyloom’s library.
             </p>
             <p>
-              Your original external MIDI file will not be changed or deleted.
+              {removing.original_id
+                ? "The original MIDI and your other practice versions will stay in the library."
+                : "Your original external MIDI file will not be changed or deleted. Remove any practice versions of this song before removing its managed copy."}
             </p>
+            {error && (
+              <p className="inline-warning" role="alert">
+                {error}
+              </p>
+            )}
             <div className="modal-actions">
               <button
                 className="button secondary"
@@ -2321,7 +2810,9 @@ export default function App() {
                 className="button danger"
                 onClick={() => void removeSong()}
               >
-                Remove managed copy
+                {removing.original_id
+                  ? "Remove practice version"
+                  : "Remove managed copy"}
               </button>
             </div>
           </section>

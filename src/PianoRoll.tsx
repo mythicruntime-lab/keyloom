@@ -16,6 +16,9 @@ interface Props {
   status: AppStatus;
   preferences: Preferences;
   onNote: (pitch: number, on: boolean) => void;
+  editing?: boolean;
+  selectedNotes?: Set<number>;
+  onToggleNote?: (id: number) => void;
 }
 interface Key {
   pitch: number;
@@ -85,6 +88,9 @@ export default function PianoRoll(props: Props) {
     height: 0,
   });
   const pressed = useRef(new Map<number, number>());
+  const noteHits = useRef<
+    { id: number; x: number; y: number; width: number; height: number }[]
+  >([]);
   const requestDraw = useRef<(() => void) | null>(null);
   const visibleNotes = useMemo(() => noteIndex(props.song.notes), [props.song]);
   current.current = {
@@ -104,6 +110,8 @@ export default function PianoRoll(props: Props) {
     let observed: AppStatus | null = null;
     let observedPrefs: Preferences | null = null;
     let observedSettings: SongSettings | null = null;
+    let observedSelection: Set<number> | undefined;
+    let observedEditing: boolean | undefined;
     const resize = new ResizeObserver(() => {
       dirty = true;
       requestDraw.current?.();
@@ -111,21 +119,34 @@ export default function PianoRoll(props: Props) {
     resize.observe(element);
     const draw = () => {
       frame = 0;
-      const { song, settings, status, preferences, received } = current.current;
+      const {
+        song,
+        settings,
+        status,
+        preferences,
+        received,
+        editing,
+        selectedNotes,
+      } = current.current;
       const { transport } = status;
-      const animate = transport.playing && !transport.waiting;
+      const animate = transport.playing && !transport.waiting && !editing;
       if (
         !document.hidden &&
         (dirty ||
           animate ||
           observed !== status ||
           observedPrefs !== preferences ||
-          observedSettings !== settings)
+          observedSettings !== settings ||
+          observedSelection !== selectedNotes ||
+          observedEditing !== editing)
       ) {
         dirty = false;
         observed = status;
         observedPrefs = preferences;
         observedSettings = settings;
+        observedSelection = selectedNotes;
+        observedEditing = editing;
+        noteHits.current = [];
         const rect = element.getBoundingClientRect();
         const width = rect.width,
           height = rect.height;
@@ -196,7 +217,8 @@ export default function PianoRoll(props: Props) {
           const key = keyMap.get(note.pitch);
           if (!key) return;
           const part = partMap.get(note.part_id);
-          if (part?.role === "muted" || (anySolo && !part?.solo)) return;
+          if (!editing && (part?.role === "muted" || (anySolo && !part?.solo)))
+            return;
           const hand =
             settings.split_pitch !== null && part?.role === "practice"
               ? note.pitch < settings.split_pitch
@@ -222,6 +244,24 @@ export default function PianoRoll(props: Props) {
           context.roundRect(x, top, w, Math.max(7, bottom - top - 2), 4);
           context.fill();
           context.globalAlpha = 1;
+          if (editing) {
+            noteHits.current.push({
+              id: note.id,
+              x,
+              y: Math.max(0, top),
+              width: w,
+              height: Math.max(
+                0,
+                Math.min(hit, top + Math.max(7, bottom - top - 2)) -
+                  Math.max(0, top),
+              ),
+            });
+            if (selectedNotes?.has(note.id)) {
+              context.strokeStyle = "#fff3cf";
+              context.lineWidth = 2.5;
+              context.stroke();
+            }
+          }
           context.fillStyle = "#10282d";
           if (preferences.labels && w > 19 && bottom - top > 20) {
             context.font = `600 ${Math.min(12, w * 0.34)}px 'Segoe UI', sans-serif`;
@@ -320,7 +360,18 @@ export default function PianoRoll(props: Props) {
   }, [visibleNotes]);
   useEffect(() => {
     requestDraw.current?.();
-  }, [props.status, props.settings, props.preferences]);
+  }, [
+    props.status,
+    props.settings,
+    props.preferences,
+    props.editing,
+    props.selectedNotes,
+  ]);
+  useEffect(() => {
+    if (!props.editing) return;
+    for (const pitch of pressed.current.values()) props.onNote(pitch, false);
+    pressed.current.clear();
+  }, [props.editing, props.onNote]);
 
   const release = (pointer: number) => {
     const pitch = pressed.current.get(pointer);
@@ -332,13 +383,31 @@ export default function PianoRoll(props: Props) {
   return (
     <canvas
       ref={canvas}
-      className={`piano-roll ${props.preferences.simulated ? "can-play" : ""}`}
-      aria-label="Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. On-screen keys are for simulated monitoring only and cannot satisfy practice targets. Enable test input to use them."
+      className={`piano-roll ${props.editing ? "note-editing" : props.preferences.simulated ? "can-play" : ""}`}
+      aria-label={
+        props.editing
+          ? "Paused note editor. Click a visible note to toggle selection. Use the accessible note list to select notes outside the keyboard range."
+          : "Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. On-screen keys are for simulated monitoring only and cannot satisfy practice targets. Enable test input to use them."
+      }
       onPointerDown={(event) => {
-        if (!props.preferences.simulated) return;
         const rect = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - rect.left,
           y = event.clientY - rect.top;
+        if (props.editing) {
+          const note = [...noteHits.current]
+            .reverse()
+            .find(
+              (note) =>
+                note.height > 0 &&
+                x >= note.x &&
+                x <= note.x + note.width &&
+                y >= note.y &&
+                y <= note.y + note.height,
+            );
+          if (note) props.onToggleNote?.(note.id);
+          return;
+        }
+        if (!props.preferences.simulated) return;
         const { keys, hit, height } = geometry.current;
         if (y < hit) return;
         const key = [...keys]

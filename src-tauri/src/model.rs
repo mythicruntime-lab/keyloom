@@ -103,6 +103,8 @@ pub struct PartSetting {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LibraryEntry {
     pub id: String,
+    #[serde(default)]
+    pub original_id: Option<String>,
     pub title: String,
     pub artist: String,
     pub tags: String,
@@ -115,6 +117,13 @@ pub struct LibraryEntry {
     pub note_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LessonState {
+    pub revision: u64,
+    pub can_undo: bool,
+    pub removed_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportResult {
     pub entry: LibraryEntry,
@@ -124,7 +133,13 @@ pub struct ImportResult {
 
 #[cfg(test)]
 mod tests {
-    use super::SongSettings;
+    use super::{LibraryEntry, SongSettings};
+
+    #[test]
+    fn older_library_entries_default_to_originals() {
+        let entry: LibraryEntry = serde_json::from_str(r#"{"id":"old-id","title":"Old song","artist":"","tags":"","arrangement":"","favorite":false,"imported_at":0,"last_played":null,"duration_ms":500,"parts_count":1,"note_count":1}"#).unwrap();
+        assert_eq!(entry.original_id, None);
+    }
 
     #[test]
     fn older_saved_settings_default_to_both_split_hands() {

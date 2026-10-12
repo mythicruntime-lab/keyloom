@@ -2,7 +2,7 @@ use crate::{
     fixtures,
     library::Library,
     midi,
-    model::{ImportResult, LibraryEntry, Song, SongSettings},
+    model::{ImportResult, LessonState, LibraryEntry, Song, SongSettings},
     runtime::{AppStatus, Command, Preferences, Runtime},
 };
 use serde::Serialize;
@@ -49,6 +49,7 @@ pub struct OpenSong {
     entry: LibraryEntry,
     song: Song,
     settings: SongSettings,
+    lesson: Option<LessonState>,
 }
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -191,22 +192,104 @@ async fn open_song(id: String, state: tauri::State<'_, AppState>) -> Result<Open
         if let Some((old_id, settings)) = old {
             library.save_settings(&old_id, &settings)?;
         }
-        let song = library.load(&id)?;
-        let settings = library.settings(&id)?;
-        library.mark_played(&id)?;
-        let entry = library.entry(&id)?;
-        runtime.send(Command::Load {
-            id,
-            song: song.clone(),
-            settings: settings.clone(),
-        })?;
-        Ok(OpenSong {
-            entry,
-            song,
-            settings,
-        })
+        load_session(&mut library, &runtime, &id)
     })
     .await
+}
+
+/// Caller holds the operations and library locks. The checkpoint ensures the
+/// returned editor snapshot is already loaded and paused in the native worker.
+fn load_session(library: &mut Library, runtime: &Runtime, id: &str) -> Result<OpenSong, String> {
+    let song = library.load(id)?;
+    let settings = library.settings(id)?;
+    let lesson = library.variant_state(id)?;
+    library.mark_played(id)?;
+    let entry = library.entry(id)?;
+    runtime.send(Command::Load {
+        id: id.to_string(),
+        song: song.clone(),
+        settings: settings.clone(),
+    })?;
+    runtime.checkpoint()?;
+    Ok(OpenSong {
+        entry,
+        song,
+        settings,
+        lesson,
+    })
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn lesson_versions(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<LibraryEntry>, String> {
+    let lib = state.library.clone();
+    blocking(move || lib.lock().map_err(lock_error)?.versions(&id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn create_variant(
+    id: String,
+    title: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<OpenSong, String> {
+    let lib = state.library.clone();
+    let runtime = state.runtime.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        runtime.send(Command::Pause)?;
+        persist_session(&lib, &runtime)?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        let entry = library.create_variant(&id, &title)?;
+        load_session(&mut library, &runtime, &entry.id).map_err(saved_version_error)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn remove_notes(
+    id: String,
+    expected_revision: u64,
+    note_ids: Vec<u32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<OpenSong, String> {
+    let lib = state.library.clone();
+    let runtime = state.runtime.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        runtime.send(Command::Pause)?;
+        persist_session(&lib, &runtime)?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        library.remove_notes(&id, expected_revision, &note_ids)?;
+        load_session(&mut library, &runtime, &id).map_err(saved_version_error)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn undo_notes(
+    id: String,
+    expected_revision: u64,
+    state: tauri::State<'_, AppState>,
+) -> Result<OpenSong, String> {
+    let lib = state.library.clone();
+    let runtime = state.runtime.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        runtime.send(Command::Pause)?;
+        persist_session(&lib, &runtime)?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        library.undo_notes(&id, expected_revision)?;
+        load_session(&mut library, &runtime, &id).map_err(saved_version_error)
+    })
+    .await
+}
+fn saved_version_error(reason: String) -> String {
+    format!("The practice version was saved, but could not reopen for playback: {reason} Open it again from the Library.")
 }
 #[tauri::command(rename_all = "snake_case")]
 async fn save_metadata(
@@ -254,17 +337,16 @@ async fn remove_song(
     let operations = state.operations.clone();
     blocking(move || {
         let _guard = operations.lock().map_err(lock_error)?;
-        if runtime
-            .checkpoint()?
-            .as_ref()
-            .is_some_and(|(key, _)| *key == id)
-        {
+        let current = runtime.checkpoint()?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        library.validate_removal(&id)?;
+        if current.as_ref().is_some_and(|(key, _)| *key == id) {
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
             runtime.send(Command::Unload(tx))?;
             rx.recv_timeout(Duration::from_secs(5))
                 .map_err(|_| "Timed out unloading the current song")?;
         }
-        lib.lock().map_err(lock_error)?.remove(&id)
+        library.remove(&id)
     })
     .await
 }
@@ -272,7 +354,11 @@ async fn remove_song(
 async fn export_song(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let lib = state.library.clone();
     blocking(move || {
-        let title = lib.lock().map_err(lock_error)?.entry(&id)?.title;
+        let entry = lib.lock().map_err(lock_error)?.entry(&id)?;
+        if entry.original_id.is_some() {
+            return Err("Edited MIDI export is not available yet. Open the original to export its unchanged MIDI.".into());
+        }
+        let title = entry.title;
         let filename: String = title
             .chars()
             .filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control())
@@ -565,7 +651,7 @@ pub fn run() {
         app.manage(AppState{library:Arc::new(Mutex::new(library)),runtime,preferences:Arc::new(Mutex::new(preferences)),root,pending:Mutex::new(pending),importing:Arc::new(AtomicBool::new(false)),operations:Arc::new(Mutex::new(())),smoke,started,launch_to_ui_us:AtomicU64::new(0)});
         let handle=app.handle().clone();std::thread::Builder::new().name("keyloom-save".into()).spawn(move||loop{std::thread::sleep(Duration::from_secs(5));if let Some(state)=handle.try_state::<AppState>(){if persist(&state).is_err(){/* Kept out of timing path; exit retries persistence. */}}else{break;}})?;
         Ok(())
-    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
+    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
     let application = builder
         .build(tauri::generate_context!())
         .expect("Keyloom could not initialize its local application data or WebView2 window");

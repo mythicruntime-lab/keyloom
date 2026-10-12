@@ -1,5 +1,33 @@
 # Keyloom verification
 
+## 0.2.0 practice versions — 12 October 2026
+
+The first approved M4 slice passed **111 Rust test executions** (55 unit + 56 integration, 71 distinct cases; one optional benchmark ignored). Strict Clippy, Rust/Prettier formatting, TypeScript and the Windows production build passed. Seven new integration cases and an older-entry compatibility case cover sparse note IDs through actual transport/Wait guidance, empty versions, byte/row preservation, independent settings, persisted bounded Undo, stale/invalid edits, additive schema upgrade, original-deletion protection, missing-source recovery and edited-export refusal before file writes. The first test compile caught unsupported digest hex formatting; byte-wise formatting fixed the test without changing its assertion.
+
+Read-only review found a Play command that could resume after entering the editor while awaiting settings persistence, and a committed edit whose playback reload could fail with an ambiguous error. Controls now recheck the song/generation/editor guards after that await. Post-commit errors explicitly report the saved version, and the UI drops stale editor state and returns to the Library for reopening. Follow-up review found both issues resolved. Driver queue/timeout failure injection was not performed in the native UI.
+
+The release executable passed the actual Tauri/WebView/native import-to-library-to-play workflow in two isolated libraries:
+
+| Native run | Exercise | Restart | Edited notes |
+| --- | --- | --- | --- |
+| Generated original exercise | 10 checks, 12,850.7 ms | 3 checks, 840.9 ms | 12 → 10 |
+| Owner-selected easy MIDI | 10 checks, 12,731.5 ms | 3 checks, 894.6 ms | 2,171 → 2,169 |
+
+Both runs created a named version using the real UI, removed stable IDs, compared the exact filtered canonical notes, switched to the unchanged original, undid and re-applied removals, tested range warnings/filtering, played the edited version and reopened it after process restart. Restart retained independent 50%/Timed settings and position, then Undo restored the exact original note data while preserving the original's 75%/Wait settings. The editor blocked Play, pending Play, Space, computer keys and simulated Canvas-key presses. These are real UI/native integration checks with explicitly dispatched test events, not physical Yamaha playing.
+
+Existing real USB MIDI Interface input open/close/reopen and output tests passed in both runs. The generated run sent 142 guide messages including the 128-note recovery baseline; timeout, pause, stop, song-change and disconnect cleanup passed. Native PC callbacks continued with zero nonzero samples during guide mute and resumed tone after disabling it. Simulated target presses remained unable to score. No new physical illumination or acoustic result is inferred from these checks; prior owner acceptance remains documented below.
+
+The closed normal library was backed up before the additive schema-2 upgrade. Read-only comparison afterward proved all five original database rows, five managed MIDI hashes and the preferences file unchanged. Native visual QA then created **First threads – practice** in the normal library, verified a Canvas note gained its selection outline/count, and finished editing without removing notes. This adds one demo practice copy; the five originals remain. [Actual editor screenshot](screenshots/lesson-editor-native.png) shows only project-authored exercise notes. Default window layout and the accessible editor controls were inspected; 4K and long sessions remain hardware checks.
+
+Evidence is under ignored `test-output/lessons-020`, `lessons-020-easy`, `pre-020-user-library`, `pre-020-baseline.json` and `normal-upgrade-020.json`. The tested executable SHA-256 is `212e70a6f737b1122f6f0411557ebcd17792f4f219fe799eb470ab6344dbed89`. No dependency version or third-party asset changed; the existing redistribution questions remain in `dependencies.md`. The installer version/resources are updated; install/uninstall retention was previously verified for 0.1.0 and was not repeated for 0.2.0.
+
+```powershell
+powershell -File scripts/Native-Smoke.ps1 -TestRoot 'D:\Keyloom\test-output\new-test-directory' -Device 'USB MIDI Interface' -OutputDevice 'USB MIDI Interface'
+# Optional -Midi '<existing local file.mid>' repeats with a private arrangement.
+```
+
+The remaining M4 work—pitch/time/duration editing, automatic simplification and edited MIDI export—and M5–M6 are deferred. Physical confirmation that removed targets no longer light or gate practice is listed in `hardware-checklist.md`.
+
 ## 0.1.3 Light Guide PC mute — 12 October 2026
 
 Light Guide now controls an atomic PC master mute in the native audio callback. It covers held/new monitoring voices, scheduled playback and clicks, while note releases/envelopes continue to progress. The saved listening preference, MIDI guidance and physical-only scoring are unchanged. No dependencies or assets were added. This is PC audio muting, not a silent-LED protocol for the Yamaha.

@@ -476,3 +476,468 @@ fn generated_thousand_song_library_search_benchmark() {
         start.elapsed().as_secs_f64(), import_timings[500], import_timings[950], search_ms);
     // Timings are observations, not pass/fail guarantees on a shared workstation.
 }
+
+fn original_row(root: &Path, id: &str) -> Vec<rusqlite::types::Value> {
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    let mut statement = db.prepare("SELECT * FROM songs WHERE id=?1").unwrap();
+    let columns = statement.column_count();
+    statement
+        .query_row([id], |row| {
+            (0..columns).map(|index| row.get(index)).collect()
+        })
+        .unwrap()
+}
+
+fn sparse_note_fixture() -> Vec<u8> {
+    let mut events = Vec::new();
+    for pitch in [60, 64, 67, 72] {
+        events.push((0, vec![0x90, pitch, 80]));
+        events.push((120, vec![0x80, pitch, 0]));
+    }
+    events.push((0, vec![0xff, 0x2f, 0]));
+    fixtures::smf(0, 480, &[fixtures::track(events)])
+}
+
+#[test]
+fn variant_sparse_ids_run_real_transport_without_mutating_original_row_or_bytes() {
+    use sha2::{Digest, Sha256};
+    use transport::{InputSource, VoiceEvent};
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let bytes = sparse_note_fixture();
+    let source = directory.write("My original.mid", &bytes);
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let canonical = library.load(&original.id).unwrap();
+    let before = original_row(&root, &original.id);
+    let variant = library
+        .create_variant(&original.id, "少ない notes")
+        .unwrap();
+    assert_eq!(original.original_id, None);
+    assert_eq!(variant.original_id.as_deref(), Some(original.id.as_str()));
+    assert_eq!(library.variant_state(&original.id).unwrap(), None);
+    library.remove_notes(&variant.id, 0, &[0, 2]).unwrap();
+    let edited = library.load(&variant.id).unwrap();
+    assert_eq!(
+        edited.notes.iter().map(|note| note.id).collect::<Vec<_>>(),
+        [1, 3]
+    );
+    assert_eq!(edited.parts[0].note_count, 2);
+    assert_eq!(edited.parts[0].id, canonical.parts[0].id);
+    assert_eq!(edited.duration_ms, canonical.duration_ms);
+    assert_eq!(edited.tempos, canonical.tempos);
+    assert_eq!(edited.time_signatures, canonical.time_signatures);
+    assert_eq!(edited.controllers, canonical.controllers);
+    assert_eq!(library.entry(&variant.id).unwrap().note_count, 2);
+    assert_eq!(library.list("少ない", false).unwrap()[0].id, variant.id);
+
+    let mut engine = transport::Engine::new();
+    engine.load(edited.clone(), library.settings(&variant.id).unwrap());
+    engine.play();
+    let events = engine.advance(canonical.duration_ms + 50.0);
+    let on_ids: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            VoiceEvent::On { key, .. } => Some(*key),
+            _ => None,
+        })
+        .collect();
+    let off_ids: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            VoiceEvent::Off { key } => Some(*key),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(on_ids, vec![1, 3]);
+    assert_eq!(off_ids, vec![1, 3]);
+
+    let mut settings = library.settings(&variant.id).unwrap();
+    settings.mode = "wait".into();
+    settings.speed = 0.75;
+    library.save_settings(&variant.id, &settings).unwrap();
+    engine.load(edited, settings);
+    engine.play();
+    engine.advance(1000.0);
+    assert_eq!(engine.guide_targets().unwrap().1, vec![64]);
+    engine.input(60, true, 80, InputSource::Physical);
+    assert!(engine.snapshot().waiting);
+    assert_eq!(engine.snapshot().correct, 0);
+    engine.input(64, true, 80, InputSource::Physical);
+    engine.input(64, false, 0, InputSource::Physical);
+    engine.advance(1000.0);
+    assert_eq!(engine.guide_targets().unwrap().1, vec![72]);
+    engine.input(72, true, 80, InputSource::Physical);
+    assert_eq!(engine.snapshot().correct, 2);
+    library.mark_played(&variant.id).unwrap();
+    assert!(library.entry(&variant.id).unwrap().last_played.is_some());
+
+    assert_eq!(library.load(&original.id).unwrap(), canonical);
+    assert_eq!(original_row(&root, &original.id), before);
+    let managed = fs::read(root.join("midi").join(format!("{}.mid", original.id))).unwrap();
+    assert_eq!(managed, bytes);
+    assert_eq!(fs::read(source).unwrap(), bytes);
+    let digest: String = Sha256::digest(&managed)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(digest, original.id);
+    let exported = directory.path().join("original export.mid");
+    library.export(&original.id, &exported).unwrap();
+    assert_eq!(fs::read(exported).unwrap(), bytes);
+}
+
+#[test]
+fn variants_restart_undo_independent_settings_and_copy_current_variant_view() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("pedal original.mid", &fixtures::tempo_sustain());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let canonical = library.load(&original.id).unwrap();
+    let original_settings = library.settings(&original.id).unwrap();
+    let first = library
+        .create_variant(&original.id, "First lesson")
+        .unwrap();
+    library
+        .remove_notes(&first.id, 0, &[canonical.notes[0].id])
+        .unwrap();
+    let mut settings = library.settings(&first.id).unwrap();
+    settings.speed = 0.5;
+    settings.mode = "wait".into();
+    settings.position_ms = 125.0;
+    settings.loop_start_ms = Some(0.0);
+    settings.loop_end_ms = Some(1000.0);
+    library.save_settings(&first.id, &settings).unwrap();
+    let mut first_metadata = library.entry(&first.id).unwrap();
+    first_metadata.tags = "private lesson tag".into();
+    first_metadata.favorite = true;
+    // The public metadata object cannot retarget a variant to another original.
+    first_metadata.original_id = Some("f".repeat(64));
+    library.update_metadata(&first_metadata).unwrap();
+    let second = library.create_variant(&first.id, "Second lesson").unwrap();
+    assert_eq!(second.original_id.as_deref(), Some(original.id.as_str()));
+    assert_eq!(library.settings(&second.id).unwrap(), settings);
+    assert_eq!(
+        library.load(&first.id).unwrap(),
+        library.load(&second.id).unwrap()
+    );
+    assert_eq!(
+        library.load(&first.id).unwrap().controllers,
+        canonical.controllers
+    );
+    assert_eq!(
+        library.variant_state(&second.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 0,
+            can_undo: false,
+            removed_count: 1
+        }
+    );
+    assert!(library.undo_notes(&second.id, 0).is_err());
+    let remaining = library.load(&second.id).unwrap().notes[0].id;
+    library.remove_notes(&second.id, 0, &[remaining]).unwrap();
+    library.undo_notes(&second.id, 1).unwrap();
+    let mut second_settings = settings.clone();
+    second_settings.speed = 1.25;
+    library.save_settings(&second.id, &second_settings).unwrap();
+    assert_eq!(library.settings(&first.id).unwrap(), settings);
+    assert_eq!(library.settings(&original.id).unwrap(), original_settings);
+    let versions = library.versions(&second.id).unwrap();
+    assert_eq!(versions.len(), 3);
+    assert_eq!(versions[0].id, original.id);
+    assert_eq!(library.list("private lesson tag", true).unwrap().len(), 2);
+    drop(library);
+
+    let mut library = Library::open(root).unwrap();
+    assert_eq!(library.settings(&second.id).unwrap(), second_settings);
+    assert_eq!(
+        library.variant_state(&first.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 1,
+            can_undo: true,
+            removed_count: 1
+        }
+    );
+    library.undo_notes(&first.id, 1).unwrap();
+    assert_eq!(library.load(&first.id).unwrap(), canonical);
+    assert_eq!(
+        library.variant_state(&first.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 2,
+            can_undo: false,
+            removed_count: 0
+        }
+    );
+    assert_eq!(
+        library
+            .variant_state(&second.id)
+            .unwrap()
+            .unwrap()
+            .removed_count,
+        1
+    );
+    assert!(library.undo_notes(&first.id, 1).is_err());
+    assert!(library.undo_notes(&first.id, 2).is_err());
+}
+
+#[test]
+fn variant_edit_validation_and_stale_revisions_are_atomic() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("original.mid", &sparse_note_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library.create_variant(&original.id, "Editable").unwrap();
+    let initial = library.load(&variant.id).unwrap();
+    assert!(library
+        .remove_notes(&original.id, 0, &[0])
+        .unwrap_err()
+        .contains("originals are read-only"));
+    for title in [" ".to_string(), "bad\0title".into(), "x".repeat(2049)] {
+        assert!(library.create_variant(&original.id, &title).is_err());
+    }
+    for ids in [vec![], vec![0, 0], vec![u32::MAX], vec![0, u32::MAX]] {
+        assert!(library.remove_notes(&variant.id, 0, &ids).is_err());
+        assert_eq!(library.load(&variant.id).unwrap(), initial);
+        assert_eq!(
+            library
+                .variant_state(&variant.id)
+                .unwrap()
+                .unwrap()
+                .revision,
+            0
+        );
+    }
+    assert!(library.remove_notes(&variant.id, 999, &[0]).is_err());
+    library.remove_notes(&variant.id, 0, &[0]).unwrap();
+    let after_first = library.load(&variant.id).unwrap();
+    assert!(library.remove_notes(&variant.id, 1, &[0, 1]).is_err());
+    assert_eq!(library.load(&variant.id).unwrap(), after_first);
+    let mut second_editor = Library::open(root).unwrap();
+    assert_eq!(
+        second_editor
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        1
+    );
+    library.remove_notes(&variant.id, 1, &[1]).unwrap();
+    assert!(second_editor.undo_notes(&variant.id, 1).is_err());
+    assert!(second_editor.remove_notes(&variant.id, 1, &[2]).is_err());
+    assert_eq!(
+        second_editor.variant_state(&variant.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 2,
+            can_undo: true,
+            removed_count: 2
+        }
+    );
+    for id in [
+        "variant-0",
+        "variant--1",
+        "variant-01",
+        "variant-+1",
+        "variant-1/../../outside",
+        "variant-9223372036854775808",
+    ] {
+        assert!(library.load(id).is_err(), "accepted {id}");
+        assert!(library.validate_removal(id).is_err(), "accepted {id}");
+    }
+    assert_eq!(library.list("", false).unwrap().len(), 2);
+}
+
+#[test]
+fn original_deletion_guards_and_missing_copy_recovery_preserve_variants() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("original.mid", &sparse_note_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Recoverable lesson")
+        .unwrap();
+    let sibling = library
+        .create_variant(&variant.id, "Can delete while hidden")
+        .unwrap();
+    library.remove_notes(&variant.id, 0, &[0, 2]).unwrap();
+    let view = library.load(&variant.id).unwrap();
+    let row_before = original_row(&root, &original.id);
+    assert!(library
+        .validate_removal(&original.id)
+        .unwrap_err()
+        .contains("practice variants"));
+    assert!(library.remove(&original.id).is_err());
+    assert_eq!(library.load(&variant.id).unwrap(), view);
+    assert_eq!(original_row(&root, &original.id), row_before);
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    assert!(db
+        .execute(
+            "UPDATE songs SET state='deleting' WHERE id=?1",
+            [&original.id]
+        )
+        .is_err());
+    assert!(db
+        .execute("DELETE FROM songs WHERE id=?1", [&original.id])
+        .is_err());
+    assert_eq!(original_row(&root, &original.id), row_before);
+    drop(db);
+    drop(library);
+
+    let managed = root.join("midi").join(format!("{}.mid", original.id));
+    fs::remove_file(&managed).unwrap();
+    let mut library = Library::open(root.clone()).unwrap();
+    assert!(library.list("", false).unwrap().is_empty());
+    assert!(library.load(&variant.id).is_err());
+    assert!(library.remove(&original.id).is_err());
+    library.remove(&sibling.id).unwrap();
+    let recovered = library.import_path(&source).unwrap();
+    assert_eq!(recovered.entry.id, original.id);
+    assert_eq!(library.list("", false).unwrap().len(), 2);
+    assert_eq!(library.load(&variant.id).unwrap(), view);
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        1
+    );
+    library.undo_notes(&variant.id, 1).unwrap();
+    library.remove(&variant.id).unwrap();
+    assert_eq!(fs::read(&managed).unwrap(), sparse_note_fixture());
+    assert_eq!(library.versions(&original.id).unwrap().len(), 1);
+    let replacement = library.create_variant(&original.id, "Fresh ID").unwrap();
+    assert_ne!(replacement.id, variant.id);
+    assert_ne!(replacement.id, sibling.id);
+    library.remove(&replacement.id).unwrap();
+    drop(library);
+    fs::remove_file(&managed).unwrap();
+    let mut library = Library::open(root).unwrap();
+    library.validate_removal(&original.id).unwrap();
+    library.remove(&original.id).unwrap();
+    assert_eq!(fs::read(source).unwrap(), sparse_note_fixture());
+}
+
+#[test]
+fn empty_variant_is_safe_for_every_practice_mode_and_export_never_writes() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("original.mid", &fixtures::tempo_sustain());
+    let mut library = Library::open(root).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Empty lesson")
+        .unwrap();
+    let original_song = library.load(&original.id).unwrap();
+    let ids: Vec<_> = original_song.notes.iter().map(|note| note.id).collect();
+    library.remove_notes(&variant.id, 0, &ids).unwrap();
+    let empty = library.load(&variant.id).unwrap();
+    assert!(empty.notes.is_empty());
+    assert!(empty.parts.iter().all(|part| part.note_count == 0));
+    assert_eq!(empty.parts.len(), original_song.parts.len());
+    assert_eq!(empty.duration_ms, original_song.duration_ms);
+    assert_eq!(empty.controllers, original_song.controllers);
+    assert_eq!(library.entry(&variant.id).unwrap().note_count, 0);
+    for mode in ["listen", "wait", "timed"] {
+        let settings = model::SongSettings {
+            mode: mode.into(),
+            ..Default::default()
+        };
+        library.save_settings(&variant.id, &settings).unwrap();
+        let mut engine = transport::Engine::new();
+        engine.load(empty.clone(), library.settings(&variant.id).unwrap());
+        engine.play();
+        let events = engine.advance(empty.duration_ms + 100.0);
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, transport::VoiceEvent::On { .. })));
+        assert!(!engine.snapshot().playing);
+        assert!(!engine.snapshot().waiting);
+        assert!(engine.guide_targets().is_none());
+    }
+    let destination = directory.path().join("must not exist.mid");
+    assert!(library
+        .export(&variant.id, &destination)
+        .unwrap_err()
+        .contains("not yet available"));
+    assert!(!destination.exists());
+    let existing = directory.write("untouched.mid", b"existing external file");
+    assert!(library.export(&variant.id, &existing).is_err());
+    assert_eq!(fs::read(existing).unwrap(), b"existing external file");
+    library.undo_notes(&variant.id, 1).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), original_song);
+}
+
+#[test]
+fn variant_undo_is_persistently_bounded_to_the_last_hundred_batches() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let mut events = Vec::new();
+    for _ in 0..101 {
+        events.push((0, vec![0x90, 60, 80]));
+        events.push((1, vec![0x80, 60, 0]));
+    }
+    events.push((0, vec![0xff, 0x2f, 0]));
+    let source = directory.write(
+        "101 notes.mid",
+        &fixtures::smf(0, 480, &[fixtures::track(events)]),
+    );
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Bounded undo")
+        .unwrap();
+    for id in 0..101 {
+        library
+            .remove_notes(&variant.id, u64::from(id), &[id])
+            .unwrap();
+    }
+    drop(library);
+    let mut library = Library::open(root).unwrap();
+    for revision in 101..201 {
+        library.undo_notes(&variant.id, revision).unwrap();
+    }
+    assert_eq!(
+        library.variant_state(&variant.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 201,
+            can_undo: false,
+            removed_count: 1
+        }
+    );
+    assert_eq!(library.load(&variant.id).unwrap().notes.len(), 100);
+    assert!(!library
+        .load(&variant.id)
+        .unwrap()
+        .notes
+        .iter()
+        .any(|note| note.id == 0));
+    assert!(library.undo_notes(&variant.id, 201).is_err());
+}
+
+#[test]
+fn schema_one_library_upgrades_additively_without_rewriting_song_rows() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("legacy original.mid", &fixtures::single_note(11));
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let before = original_row(&root, &original.id);
+    drop(library);
+    // This isolated fixture removes only the new schema, reproducing the old
+    // schema exactly. Production startup never drops tables or existing data.
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    db.execute_batch("DROP VIEW library_entries; DROP TRIGGER protect_variant_original_delete;
+        DROP TRIGGER protect_variant_original_deleting; DROP TABLE variants; PRAGMA user_version=1;").unwrap();
+    drop(db);
+    let mut library = Library::open(root.clone()).unwrap();
+    assert_eq!(original_row(&root, &original.id), before);
+    assert_eq!(library.entry(&original.id).unwrap(), original);
+    let variant = library
+        .create_variant(&original.id, "First migrated lesson")
+        .unwrap();
+    assert_eq!(library.versions(&variant.id).unwrap().len(), 2);
+    assert_eq!(original_row(&root, &original.id), before);
+}

@@ -1,5 +1,9 @@
 # Yamaha verification
 
+## Practice versions — 0.2.0
+
+Automated native tests verify edited-song playback, original preservation, Undo/restart and simulated-input isolation. No new physical playing result is claimed for edited versions. On a saved practice version, remove a target with Edit notes, finish editing and play with Light Guide: confirm the removed note is neither lit nor required. Switch to the original and confirm the target returns. Pause, version switching and edit entry should clear lights. These extend, rather than replace, the owner's prior 0.1.2/0.1.3 checks below.
+
 ## PC audio mute — 12 October 2026
 
 0.1.3 passed native callback checks for zero PC samples with Light Guide on, sound returning with it off, and saved mute after restart. Inputs for those automated checks were explicitly simulated.

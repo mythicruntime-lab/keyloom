@@ -1,6 +1,14 @@
 # Keyloom handoff
 
-## Current follow-up — 12 October 2026
+## Current release — 0.2.0, 12 October 2026
+
+The owner-approved first M4 slice is implemented: named practice versions, Canvas/list selection and note removal, persistent Undo for the last 100 removals, original/version switching and keyboard-range warnings. Original MIDI bytes/canonical data stay unchanged; edits live separately with independent settings and revisions. Playback pauses for editing; simulated UI notes cannot score or play during editing. Saving a copy of a version starts from its current notes with fresh Undo history. Originals with dependent versions cannot be removed. Automatic simplification, pitch/time/duration editing, edited MIDI export, recording and M5–M6 remain outside this approval.
+
+Validation passed: 111 Rust executions (55 unit + 56 integration; 71 distinct cases, one optional benchmark ignored), strict Clippy, formatting, TypeScript and Windows production build. Two real native runs each passed ten exercise checks and three restart checks: generated fixtures and the owner's selected 2,171-note easy MIDI. They cover import→library→play, create/remove/Undo/version comparison, independent settings/restart, range warnings and input isolation, plus real USB MIDI port/output and PC-mute regression checks. These runs do not claim physical playing or optical verification of edited versions. Review found and fixed a delayed Play/editor race and misleading post-commit playback-reload failures.
+
+Before upgrading, the closed five-song normal library was backed up to ignored `test-output/pre-020-user-library`. The schema-2 upgrade preserved all five original database rows, MIDI file hashes and preferences exactly. Native visual QA then created `First threads – practice` as a ready-to-try copy in the normal library, selected a visible note on Canvas and finished editing without removing any notes. There are now five originals plus this practice copy. Existing private arrangements were not edited or included in the package. See `docs/test-report.md` and `docs/screenshots/lesson-editor-native.png`.
+
+## Previous audio follow-up — 12 October 2026
 
 The owner clarified that Light Guide should mute Keyloom's PC tone while they listen to the Yamaha. Version 0.1.3 applies a PC master mute while the saved Light Guide toggle is on, including already sounding/new input tones, arrangement playback and clicks. Turning it off restores PC audio while keeping the listening preference. MIDI messages, physical input and matching remain unchanged. This does not claim silent Yamaha illumination; guide Note Ons can still sound the keyboard.
 
@@ -8,7 +16,7 @@ The owner clarified that Light Guide should mute Keyloom's PC tone while they li
 
 ## Delivered state
 
-M0–M3 are implemented and software-verified. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. No M4–M6 features or external services were added. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.
+M0–M3 and the approved first M4 slice are implemented and software-verified. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. The remaining M4 roadmap, M5–M6 and external services are deferred. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.
 
 The owner's chosen easy MIDI is Ready in the normal managed library, with 2,171 notes in one combined part. It passed the actual installed import-to-library-to-play workflow without restart. The source remains private and untouched; it is not in Git or any release resource. The original generated First threads exercise is also available, and the owner has since added more songs.
 
@@ -18,15 +26,17 @@ The 0.1.1 display update gives the strike line a fixed bright pink band, pale sh
 
 ## Run and build
 
-- Run `artifacts/Keyloom-0.1.3-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.3_x64-setup.exe`.
-- Portable ZIP: `artifacts/Keyloom-0.1.3-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
+- Run `artifacts/Keyloom-0.2.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.2.0_x64-setup.exe`.
+- Portable ZIP: `artifacts/Keyloom-0.2.0-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
 - From this checkout: `powershell -File scripts/Launch.ps1`.
 - Restore/build: `powershell -File scripts/Build.ps1 -Mode restore`, then `powershell -File scripts/Build.ps1 -Mode package -Jobs 2`.
 - Built apps need Windows x64 and installed WebView2; no development tools, Python, network, account or administrator access. These builds are unsigned.
 
 Open Keyboard & sound, select USB MIDI Interface, and choose Yamaha speakers or PC basic tone. Calibrate the actual keyboard endpoints. For Light Guide, connect adapter OUT → Yamaha IN, enable the Yamaha's OVERALL o1 setting, connect the MIDI output and enable Light Guide. Open a song, choose Wait for me, then Play. Its combined part can use the explicitly approximate split for one-hand practice. Output is limited to guide notes; MIDI Thru and imported SysEx are never sent.
 
-Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; remove deletes only the confirmed managed copy. Uninstall retains data unless the interactive delete-data checkbox is selected. Keep this directory when updating/backing up. Normal app shutdown ends all its workers.
+Open a song → **Save practice version** → **Create practice version** → **Edit notes**. Select notes on the roll or list, remove them, then **Done editing** to play. Use **Undo removal** or **Lesson version** to compare with the untouched original.
+
+Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; remove deletes only the confirmed managed copy or practice-version record. Uninstall retains data unless the interactive delete-data checkbox is selected. Keep this directory when updating/backing up. Normal app shutdown ends all its workers.
 
 ## Evidence and checkpoints
 
@@ -46,7 +56,7 @@ Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; re
 
 Basic physical Wait for me, reconnect and Light Guide PC mute/unmute are owner-reported passes. Detailed repeated-note/chord/velocity edge cases, long-session sound/dropouts, actual range, 4K scaling and end-to-end latency still need confirmation. Physical pedal testing is not applicable to the owner's setup. Follow `docs/hardware-checklist.md`; port opening and simulated targets do not independently prove physical playing.
 
-Sound is a labeled basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity, general playback MIDI output, detailed note editing, MusicXML/OMR, transcription, downloading, cloud/accounts and LLM features are deferred. Guide output may sound the Yamaha as well as light keys; no independent silent-LED protocol is claimed. Listen sends no guide notes. Long sessions, cable-loss recovery with lit notes, Timed-mode physical guidance and failed-driver cleanup remain additional hardware checks. Type 2/SMPTE MIDI is explicitly unsupported. If the Windows audio output changes/fails, restart Keyloom to reopen it. No other-platform claim is made.
+Sound is a labeled basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity, general playback MIDI output, pitch/time/duration editing, edited MIDI export, MusicXML/OMR, transcription, downloading, cloud/accounts and LLM features are deferred. Guide output may sound the Yamaha as well as light keys; no independent silent-LED protocol is claimed. Listen sends no guide notes. Physically confirming removed targets on a practice version, long sessions, cable-loss recovery with lit notes, Timed guidance and failed-driver cleanup remain additional hardware checks. Type 2/SMPTE MIDI is explicitly unsupported. If the Windows audio output changes/fails, restart Keyloom to reopen it. No other-platform claim is made.
 
 Before any public release, confirm copyright-holder wording in LICENSE and review the remaining exact-binary provenance of Tauri's prebuilt installer helper and Microsoft static CRT redistribution rights in `docs/dependencies.md`. MPL source/notice obligations are handled by the shipped unmodified source archives; all dependency terms remain separate from project MIT. Optional upstream taskbar-unpin code was omitted; manually unpin retained taskbar pins after uninstall.
 

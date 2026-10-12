@@ -988,6 +988,11 @@ main {
   padding: 15px 0;
   border-top: 1px solid #2b3b4b;
   border-bottom: 1px solid #2b3b4b;
+  border-left: 0;
+  border-right: 0;
+  margin-left: 0;
+  margin-right: 0;
+  min-width: 0;
   margin-bottom: 18px;
 }
 .mode-switch {
@@ -1042,7 +1047,7 @@ main {
   display: flex;
   gap: 17px;
   min-height: 350px;
-  height: calc(100vh - 322px);
+  height: calc(100vh - 386px);
   max-height: 1000px;
 }
 .roll-panel {
@@ -1285,6 +1290,13 @@ main {
   gap: 8px;
   font-size: 9px;
   color: #8fa6b9;
+}
+fieldset.loop-controls,
+fieldset.transport-checks {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
 .transport-checks {
   gap: 12px;
@@ -1592,7 +1604,7 @@ main {
   width: 100%;
 }
 .fullscreen .practice-body {
-  height: calc(100vh - 322px);
+  height: calc(100vh - 386px);
   max-height: none;
 }
 @media (min-width: 1600px) {
@@ -1655,7 +1667,7 @@ main {
     padding: 32px 38px 22px;
   }
   .practice-body {
-    height: calc(100vh - 349px);
+    height: calc(100vh - 413px);
   }
   .part-title > span {
     font-size: 13px;
@@ -1851,7 +1863,7 @@ main {
     font-size: 12px;
   }
   .practice-body {
-    height: calc(100vh - 347px);
+    height: calc(100vh - 411px);
     gap: 11px;
     min-height: 330px;
   }
@@ -1909,7 +1921,213 @@ main {
 /* Import success remains visible without pushing the practice transport below
    a normal desktop window. Match the direct banner rendered above this view. */
 main:has(> .import-banner) .practice-body {
-  height: calc(100vh - 420px);
+  height: calc(100vh - 484px);
+}
+.version-badge {
+  display: inline-block;
+  margin: 5px 0 0;
+  border: 1px solid #3c4f61;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #9db3c2;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.version-badge.variant {
+  color: #b5e0d0;
+  border-color: #426b61;
+  background: #203a36;
+}
+.lesson-version-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  min-height: 52px;
+  padding-bottom: 12px;
+}
+.lesson-version-select {
+  flex: 1;
+  min-width: 150px;
+  max-width: 420px;
+  color: #91a9bb;
+  font-size: 10px;
+}
+.lesson-version-select select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 9px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+.lesson-version-detail {
+  flex: 1;
+  padding-bottom: 8px;
+  color: #8faaa6;
+  font-size: 10px;
+}
+.lesson-version-bar > .button-row {
+  flex-shrink: 0;
+  padding-bottom: 1px;
+}
+.lesson-version-bar .small-button {
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+.piano-roll.note-editing {
+  cursor: crosshair;
+}
+.lesson-editor {
+  width: 330px;
+  flex-shrink: 0;
+  border: 1px solid #506967;
+  border-radius: 9px;
+  padding: 13px;
+  background: #182a35;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.lesson-editor > * {
+  flex-shrink: 0;
+}
+.lesson-editor .card-title {
+  margin: 0;
+  gap: 8px;
+}
+.lesson-editor h2 {
+  font-size: 15px;
+}
+.lesson-editor .help-text,
+.lesson-editor .field-label {
+  font-size: 10px;
+  margin: 0;
+}
+.lesson-edit-summary,
+.lesson-list-actions,
+.lesson-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: #a4babd;
+}
+.lesson-edit-summary strong {
+  color: #e1ebde;
+}
+.lesson-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.lesson-edit-actions .button {
+  width: 100%;
+  justify-content: center;
+  font-size: 11px;
+  padding: 8px 10px;
+}
+.lesson-editor .small-button {
+  font-size: 10px;
+  padding: 5px 7px;
+}
+.lesson-range-warning {
+  border-left: 2px solid #e6b57f;
+  padding-left: 9px;
+  color: #dcc29e;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.lesson-range-warning[data-out-of-range-count="0"] {
+  border-color: #70988d;
+  color: #a6c5bc;
+}
+.lesson-editor .field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+.lesson-editor select {
+  width: auto;
+  max-width: 195px;
+  font-size: 10px;
+  padding: 6px 8px;
+  margin: 0;
+}
+.lesson-note-list {
+  overflow-y: auto;
+  min-height: 128px;
+  max-height: 420px;
+  flex: 1 0 128px;
+  border: 1px solid #334d5b;
+  border-radius: 5px;
+  background: #14222f;
+}
+.lesson-note-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #2a414f;
+}
+.lesson-note-row:last-child {
+  border-bottom: 0;
+}
+.lesson-note-row.selected {
+  background: #2b4c45;
+}
+.lesson-note-row label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.lesson-note-row label > span {
+  min-width: 0;
+}
+.lesson-note-row strong {
+  display: block;
+  color: #dfede3;
+  font-size: 11px;
+}
+.lesson-note-row small {
+  color: #8aa6b8;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+.lesson-note-row strong small {
+  margin-left: 4px;
+  font-weight: 400;
+}
+.lesson-note-row em {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  margin-top: 3px;
+  color: #edbe87;
+}
+.lesson-note-list > .help-text {
+  padding: 12px;
+}
+@media (max-width: 1250px) {
+  .lesson-version-detail {
+    display: none;
+  }
+  .lesson-version-select {
+    max-width: none;
+  }
+  .lesson-version-bar {
+    gap: 10px;
+  }
+  .lesson-editor {
+    width: 292px;
+    padding: 10px;
+  }
 }
 .guide-toggle {
   white-space: nowrap;
