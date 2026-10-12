@@ -4,12 +4,14 @@
 
 M0–M3 are implemented and software-verified. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. No M4–M6 features or external services were added. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.
 
-The owner's chosen easy MIDI is Ready in the normal managed library, with 2,171 notes in one combined part. It passed the actual installed import-to-library-to-play workflow without restart. The source remains private and untouched; it is not in Git or any release resource. The original generated First threads exercise is also available.
+The owner's chosen easy MIDI is Ready in the normal managed library, with 2,171 notes in one combined part. It passed the actual installed import-to-library-to-play workflow without restart. The source remains private and untouched; it is not in Git or any release resource. The original generated First threads exercise is also available, and the owner has since added more songs.
+
+The 0.1.1 display update gives the strike line a fixed bright pink band, pale sharp top edge and dark separation from the notes/keys. The timing boundary and practice behavior are unchanged. The owner reports Wait for me and reconnect working well on the Yamaha; no pedal is owned, so physical pedal testing is not applicable.
 
 ## Run and build
 
-- Run `artifacts/Keyloom-0.1.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.0_x64-setup.exe`.
-- Portable ZIP: `artifacts/Keyloom-0.1.0-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
+- Run `artifacts/Keyloom-0.1.1-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.1_x64-setup.exe`.
+- Portable ZIP: `artifacts/Keyloom-0.1.1-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
 - From this checkout: `powershell -File scripts/Launch.ps1`.
 - Restore/build: `powershell -File scripts/Build.ps1 -Mode restore`, then `powershell -File scripts/Build.ps1 -Mode package -Jobs 2`.
 - Built apps need Windows x64 and installed WebView2; no development tools, Python, network, account or administrator access. These builds are unsigned.
@@ -29,10 +31,11 @@ Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; re
 - Running-instance file delivery, duplicate imports, source moves, interrupted-import recovery, 1,000-song import/search and retained settings/progress passed.
 - Installer/uninstaller tests passed and retained normal data; all 562 license/source resource files matched. Final binaries and checksums are local only.
 - Measurements, reproducible commands, screenshots and limits: `docs/test-report.md`.
+- 0.1.1: TypeScript, component formatting and Windows production build passed; the actual native import/play exercise passed all eight checks plus persistence restart, using an isolated test library. Wait matching in that test was simulated; physical Wait for me and reconnect results are the owner's report.
 
 ## Honest remaining boundaries
 
-Physical Yamaha notes/pedal, audible sound/dropouts, unplug/replug, actual range, 4K scaling and end-to-end latency still need the owner. Follow `docs/hardware-checklist.md`; port opening and simulated targets do not prove physical playing.
+Basic physical Wait for me and reconnect are owner-reported passes. Detailed repeated-note/chord/velocity edge cases, audible sound/dropouts, actual range, 4K scaling and end-to-end latency still need confirmation. Physical pedal testing is not applicable to the owner's setup. Follow `docs/hardware-checklist.md`; port opening and simulated targets do not independently prove physical playing.
 
 Sound is a labeled basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity, MIDI output, detailed note editing, MusicXML/OMR, transcription, downloading, cloud/accounts and LLM features are deferred. Type 2/SMPTE MIDI is explicitly unsupported. If the Windows audio output changes/fails, restart Keyloom to reopen it. No other-platform claim is made.
 

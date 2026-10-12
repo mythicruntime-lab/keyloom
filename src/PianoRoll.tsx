@@ -284,12 +284,17 @@ export default function PianoRoll(props: Props) {
             }
           }
         context.textAlign = "start";
-        context.fillStyle = transport.waiting ? "#f0b985" : "#70d6c1";
+        // Keep the strike boundary distinct from both hand colors in every mode.
+        // The sharp top edge stays at the same musical hit position.
+        context.fillStyle = "#080e18";
+        context.fillRect(0, hit - 1, width, 5);
+        context.fillStyle = "#ff5ca8";
+        context.shadowColor = "#ff5ca8";
+        context.shadowBlur = 8;
         context.fillRect(0, hit, width, 3);
-        context.shadowColor = "#70d6c1";
-        context.shadowBlur = 12;
-        context.fillRect(0, hit, width, 1);
         context.shadowBlur = 0;
+        context.fillStyle = "#ffe5f2";
+        context.fillRect(0, hit, width, 1);
       }
       if (animate && !document.hidden) frame = requestAnimationFrame(draw);
     };
@@ -328,7 +333,7 @@ export default function PianoRoll(props: Props) {
     <canvas
       ref={canvas}
       className={`piano-roll ${props.preferences.simulated ? "can-play" : ""}`}
-      aria-label="Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The visible hit line is above the keyboard. Simulated key input requires enabling the test input switch."
+      aria-label="Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. Simulated key input requires enabling the test input switch."
       onPointerDown={(event) => {
         if (!props.preferences.simulated) return;
         const rect = event.currentTarget.getBoundingClientRect();

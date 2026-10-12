@@ -4,14 +4,14 @@ An original, offline Windows piano trainer built with Tauri 2, Rust, React, Type
 
 ## Run
 
-In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.1.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.0_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
+In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.1.1-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.1_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
 
 Windows 11 x64 and the installed Microsoft Edge WebView2 Evergreen Runtime are required. WebView2 is already present on the development machine. The package does not download or install it. No administrator access, Python, Node, Rust, account, server, internet connection or NVIDIA setting change is needed to run the built app.
 
 1. Choose **Import MIDI** or drop `.mid` / `.midi` files into the window. The result exposes **Open**, even when search or Favorites hides the song.
 2. Open **Keyboard & sound**, refresh devices, select your USB MIDI interface, and connect it. Select Yamaha speakers or PC basic-tone monitoring. MIDI output/Thru is not implemented, so the app never sends imported SysEx or configuration messages to your keyboard.
 3. Set the keyboard's actual lowest/highest keys, or use the endpoint learning buttons. The initial range is only a display starting point; it is not a detected key count.
-4. Open **Practice**, select Listen, Wait for me, or Timed, assign parts, and press Play. In Wait mode all target pitches require fresh key presses; the pedal does not satisfy notes. For a combined part, the adjustable pitch split is an approximate left/right guide and practice filter, not melody extraction.
+4. Open **Practice**, select Listen, Wait for me, or Timed, assign parts, and press Play. Play as a note's leading edge reaches the **bright pink line above the keys**. In Wait mode all target pitches require fresh key presses; the pedal does not satisfy notes. For a combined part, the adjustable pitch split is an approximate left/right guide and practice filter, not melody extraction.
 5. Use Pause, Restart, Stop, seek, A–B loops, speed, count-in/metronome, or Panic as needed. Keyboard, part, loop, speed and position settings persist.
 
 **Basic practice tone** is a generated synth sound, not a sampled piano. Your Yamaha's own speakers are the default player-monitoring choice. Accompaniment and Listen playback use the PC tone. SoundFonts and authentic General MIDI instrumentation are not included.
@@ -25,7 +25,7 @@ MIDI 0/1 with musical tick division are supported. Type 2 and SMPTE division rec
 Open a file directly:
 
 ```powershell
-& .\artifacts\Keyloom-0.1.0-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
+& .\artifacts\Keyloom-0.1.1-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
 ```
 
 A second launch forwards the file to the running instance. During interactive installation you can optionally add Keyloom to Windows **Open with** for MIDI; the installer does not replace your default application. Silent installation skips that optional registration. Uninstall removes its own ordinary shortcuts. If you manually pinned Keyloom to the taskbar, unpin it manually after uninstall.

@@ -1,4 +1,16 @@
-# Keyloom 0.1.0 verification
+# Keyloom verification
+
+## Owner follow-up — 11 October 2026
+
+After adding more songs and playing, the owner reports that Wait for me and reconnect work well on the Yamaha. The owner has no pedal; physical pedal verification is not applicable to this setup. This supersedes the corresponding basic checks marked unverified in the original delivery evidence below, without claiming every repeated-note/chord/reconnect edge case was exercised.
+
+## 0.1.1 strike-line update — 11 October 2026
+
+The strike line now stays bright pink in Listen, Wait for me and Timed modes, with a pale one-pixel top edge and dark separation from the notes/keys. Its musical hit position is unchanged. No dependency versions or MIDI/transport/persistence logic changed.
+
+TypeScript, Prettier for the changed component and the production Windows build passed. The updated executable passed the existing actual native exercise (eight checks, 3,672.9 ms) and persistence restart (one check, 213.1 ms), including import-to-library-to-play without restart, simulated wait matching and two USB MIDI Interface open/close/reopen cycles. Evidence: ignored `test-output/hit-line-011`. These automated checks did not play physical keys. The earlier 73-execution Rust suite was not rerun for this Canvas-only behavior change. The normal managed library contained five MIDI files before reopening; test imports used a separate directory.
+
+## Original 0.1.0 delivery evidence
 
 Verified on 11 October 2026, Windows 11 x64, Node 24.11.1/npm 11.6.2, Rust/Cargo 1.98.0, VS 2022 Build Tools 17.14.21, Windows SDK 10.0.26100.0 and WebView2 154.0.4258.62. One heavy build/test at a time, two Cargo workers. No other projects, agent processes, driver/overlay settings, services or scheduled tasks were changed.
 
