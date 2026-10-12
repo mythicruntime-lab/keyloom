@@ -7,6 +7,7 @@ User-visible changes to Keyloom are recorded here. Version dates refer to local 
 - Light Guide now mutes Keyloom's PC audio, including key-press tones, accompaniment/Listen playback, count-in and metronome. Turn Light Guide off to restore PC audio; the chosen listening preference is retained.
 - Apply the mute to already sounding and newly played tones, and restore it on launch when Light Guide was saved on. MIDI input, target matching and Yamaha guide messages are unchanged.
 - Show the audio override beside Light Guide and the computer listening option. Added native callback checks for silence, unmute and restart persistence.
+- Owner verified with physical Yamaha keys: PC audio stays silent with Light Guide on while the Yamaha sounds, and PC tones return when Light Guide is switched off.
 - Added this changelog to the repository and Windows package resources.
 
 ## 0.1.2 — 2026-10-11

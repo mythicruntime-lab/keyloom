@@ -20,7 +20,9 @@ With software monitoring selected through the UI, explicitly simulated input pro
 | Simulated target presses while guide enabled | 12,000 | 0 |
 | Saved guide mute after app restart | 12,480 | 0 |
 
-Callbacks continued throughout muted samples. Simulated target presses did not advance position, change scores or alter the lit target. No stale released-note backlog played on unmute. These are actual native audio sample measurements, not microphone recordings or proof of physical-keyboard audibility. Muted Listen/count-in/metronome share the same final sample gate but were not separately exercised in the new native checks. A new owner listening check is pending; the 0.1.2 optical/physical results below remain separate.
+Callbacks continued throughout muted samples. Simulated target presses did not advance position, change scores or alter the lit target. No stale released-note backlog played on unmute. These are actual native audio sample measurements, not microphone recordings or proof of physical-keyboard audibility. Muted Listen/count-in/metronome share the same final sample gate but were not separately exercised in the new native checks.
+
+**The owner separately passed the physical listening check on 12 October 2026.** With Through my computer selected and physical Yamaha keys played, the PC stayed silent while the Yamaha sounded with Light Guide on; switching the guide off restored PC tones. The owner confirmed: "Yes—PC is silent with guide on, and returns with guide off." This completes the requested PC mute acceptance. It does not claim silent Yamaha guide notes, measured acoustic latency or exhaustive audio-mode testing; the 0.1.2 optical/physical results below remain separate.
 
 ## 0.1.2 Yamaha Light Guide — 11 October 2026
 

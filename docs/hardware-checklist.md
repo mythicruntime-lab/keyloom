@@ -2,7 +2,9 @@
 
 ## PC audio mute — 12 October 2026
 
-0.1.3 passed native callback checks for zero PC samples with Light Guide on, sound returning with it off, and saved mute after restart. Inputs for those automated checks were explicitly simulated. The owner listening check is pending: select Through my computer, play physical Yamaha keys with Light Guide on (PC silent, Yamaha audible), then with Light Guide off (PC tone returns), and leave the guide on. This does not verify silent Yamaha guide notes or replace the earlier optical checks.
+0.1.3 passed native callback checks for zero PC samples with Light Guide on, sound returning with it off, and saved mute after restart. Inputs for those automated checks were explicitly simulated.
+
+**Physical listening check passed with the owner**, using the Yamaha EZ-150 through USB MIDI Interface with Through my computer selected: physical key presses left PC output silent while the Yamaha sounded with Light Guide on, and PC tones returned with Light Guide off. The owner confirmed: "Yes—PC is silent with guide on, and returns with guide off." This does not verify silent Yamaha guide notes or replace the earlier optical checks.
 
 ## Owner-reported results — 11 October 2026
 
