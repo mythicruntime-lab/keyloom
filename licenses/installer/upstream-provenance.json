@@ -1,0 +1,46 @@
+[
+  {
+    "component": "NSIS-3.11",
+    "file": "licenses/installer/NSIS-3.11/COPYING",
+    "source": "https://raw.githubusercontent.com/kichik/nsis/v311/COPYING",
+    "sha256": "dc0f74a312c08ffc900548a67ae9a3670ed28ad25a3afda1fe0504da16f89361"
+  },
+  {
+    "component": "nsis-tauri-utils-0.5.3",
+    "file": "licenses/installer/nsis-tauri-utils-0.5.3/LICENSE_MIT",
+    "source": "https://raw.githubusercontent.com/tauri-apps/nsis-tauri-utils/nsis_tauri_utils-v0.5.3/LICENSE_MIT",
+    "sha256": "1c1020fa10a6bf318717e82c911bcc54ebdfb9bb280460ae332bcb2f82f57fbe"
+  },
+  {
+    "component": "nsis-tauri-utils-0.5.3",
+    "file": "licenses/installer/nsis-tauri-utils-0.5.3/LICENSE_APACHE-2.0",
+    "source": "https://raw.githubusercontent.com/tauri-apps/nsis-tauri-utils/nsis_tauri_utils-v0.5.3/LICENSE_APACHE-2.0",
+    "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+  },
+  {
+    "component": "nsis-tauri-utils-0.5.3",
+    "file": "licenses/installer/nsis-tauri-utils-0.5.3/Cargo.toml",
+    "source": "https://raw.githubusercontent.com/tauri-apps/nsis-tauri-utils/nsis_tauri_utils-v0.5.3/Cargo.toml",
+    "sha256": "a652c35630f2991b7bb12e4ef8327a54e39bba9817ee2ab688c969afc8a99b5b"
+  },
+  {
+    "component": "nsis-tauri-utils-0.5.3",
+    "file": "licenses/installer/nsis-tauri-utils-0.5.3/plugin-Cargo.toml",
+    "source": "https://raw.githubusercontent.com/tauri-apps/nsis-tauri-utils/nsis_tauri_utils-v0.5.3/crates/nsis-tauri-utils/Cargo.toml",
+    "sha256": "7cb1532f034a44b8b59a0a45c094d37a34f031fc6305df0863540eae1d572b30"
+  },
+  {
+    "component": "tauri-bundler-2.12.2",
+    "file": "licenses/installer/tauri-bundler-2.12.2/LICENSE-MIT",
+    "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d",
+    "source": "https://www.npmjs.com/package/@tauri-apps/cli/v/2.12.2",
+    "origin": "exact installed CLI package notice"
+  },
+  {
+    "component": "tauri-bundler-2.12.2",
+    "file": "licenses/installer/tauri-bundler-2.12.2/LICENSE-APACHE-2.0",
+    "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "source": "https://www.npmjs.com/package/@tauri-apps/cli/v/2.12.2",
+    "origin": "exact installed CLI package notice"
+  }
+]

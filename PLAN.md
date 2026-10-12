@@ -10,3 +10,5 @@ Implement the supplied Piano Trainer brief as an original, offline Windows appli
 One heavy build at a time; Cargo jobs defaults to 2. Lead owns integration, audio/MIDI, packaging, verification, and documentation. Delegates have separate source ownership. MIDI output and SoundFonts are deferred; basic tone is explicitly synthetic. No private songs or downloaded assets are bundled.
 
 Environment: Windows 11; Node 24.11.1, npm 11.6.2, Rust/Cargo 1.98.0, VS 2022 Build Tools 17.14.21 with C++ tools and Windows SDK 10.0.26100.0, WebView2 154.0.4258.62. Rust exists under the user's Cargo bin directory but is absent from the shell PATH. No baseline source/tests existed.
+
+M0–M3 are now implemented. Runnable local milestone commits preserve the spike, library and practice implementation; M3 adds tested Windows installer/portable delivery, exact dependency notices, generated-fixture and real native workflow evidence. Physical Yamaha acceptance is still pending, as distinguished in `HANDOFF.md` and `docs/hardware-checklist.md`. M4–M6 remain deferred.

@@ -1,0 +1,56 @@
+[
+  {
+    "package": "alloc-stdlib-0.3.0",
+    "file": "licenses/supplements/alloc-stdlib-0.3.0/LICENSE",
+    "source": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE",
+    "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+  },
+  {
+    "package": "dasp_sample-0.11.0",
+    "file": "licenses/supplements/dasp_sample-0.11.0/LICENSE-MIT",
+    "source": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+    "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0"
+  },
+  {
+    "package": "dasp_sample-0.11.0",
+    "file": "licenses/supplements/dasp_sample-0.11.0/LICENSE-APACHE",
+    "source": "https://raw.githubusercontent.com/RustAudio/dasp/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+    "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512"
+  },
+  {
+    "package": "defmt-parser-1.0.0",
+    "file": "licenses/supplements/defmt-parser-1.0.0/LICENSE-MIT",
+    "source": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+    "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50"
+  },
+  {
+    "package": "midly-0.5.3",
+    "file": "licenses/supplements/midly-0.5.3/LICENSE",
+    "source": "https://raw.githubusercontent.com/negamartin/midly/816cb2a585b4d5d1fd7aeb0cb35668f21dc00869/LICENSE",
+    "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd"
+  },
+  {
+    "package": "webview2-com-macros-0.8.1",
+    "file": "licenses/supplements/webview2-com-macros-0.8.1/LICENSE",
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+    "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+  },
+  {
+    "package": "webview2-com-sys-0.39.1",
+    "file": "licenses/supplements/webview2-com-sys-0.39.1/LICENSE",
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+    "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+  },
+  {
+    "package": "webview2-com-0.39.1",
+    "file": "licenses/supplements/webview2-com-0.39.1/LICENSE",
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+    "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+  },
+  {
+    "package": "Microsoft.Web.WebView2 1.0.3800.47",
+    "file": "licenses/native/WebView2-SDK-1.0.3800.47-LICENSE.txt",
+    "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3800.47/License",
+    "sha256": "324083bf015092054be9d5851dafa1b79cbfab3331ff983476d502839515d8bb"
+  }
+]

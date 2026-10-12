@@ -27,7 +27,9 @@ not a claim of sample-accurate or measured physical MIDI latency.
   an opaque score. Wait does not count misses for taking time.
 - Timed runs continuously. The current uncompleted group accepts presses within
   ±150 ms of wall time around its onset (scaled to song time by speed). Each
-  unmatched pitch becomes missed when that group's window passes. Fast passages
+  unmatched pitch becomes missed when that group's window passes. Valid timed
+  pitch credit remains even if a partial chord's input window expires.
+  Replaying that pitch cannot receive duplicate credit. Fast passages
   advance to the next group when the current group completes. Matching is in
   onset order, not an automatic nearest-note alignment algorithm.
   Song end and loop B close any remaining onset windows: partial valid chord

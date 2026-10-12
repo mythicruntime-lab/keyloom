@@ -1,0 +1,5 @@
+* text=auto
+# Preserve third-party notice/source bytes exactly as recorded by the audit.
+/licenses/** -text
+*.png -text
+*.ico -text
