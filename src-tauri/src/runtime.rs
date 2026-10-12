@@ -137,7 +137,7 @@ impl Runtime {
             status: status.clone(),
         };
         std::thread::Builder::new().name("keyloom-transport".into()).spawn(move||{
-            let (audio,audio_error)=Audio::open();let (midi_tx,midi_rx)=mpsc::sync_channel(512);let dropped=Arc::new(AtomicU64::new(0));
+            let (audio,audio_error)=Audio::open();audio.sender.set_muted(preferences.light_guide);let (midi_tx,midi_rx)=mpsc::sync_channel(512);let dropped=Arc::new(AtomicU64::new(0));
             let mut worker=Worker{engine,audio,preferences,connection:None,device_name:None,device_error:None,audio_error,held:[[false;128];32],pedals:[false;32],events:Vec::with_capacity(64),sequence:0,current:None,settings:SongSettings::default(),output:None,guide:GuideNotes::new(),output_name:None,output_error:None,test_until:None,output_messages:0,unreleased_outputs:Vec::new()};
             if let Some(id)=worker.preferences.device_id.clone(){if id.contains("ambiguous]"){worker.device_error=Some("Ambiguous saved port; select the input explicitly".into());}else{worker.connect(Some(id),&midi_rx,midi_tx.clone(),dropped.clone()).ok();}}
             if let Some(id)=worker.preferences.output_device_id.clone(){if id.contains("ambiguous]"){worker.output_error=Some("Ambiguous saved output; select it explicitly".into());}else{worker.connect_output(Some(id)).ok();}}
@@ -158,7 +158,7 @@ impl Runtime {
                     // Only Connect owns device selection; a stale preferences
                     // payload cannot relabel or disconnect an active MIDI port.
                     Command::Preferences(mut p,reply)=>{p.device_id=worker.preferences.device_id.clone();p.output_device_id=worker.preferences.output_device_id.clone();if worker.preferences.monitor!=p.monitor||worker.preferences.simulated!=p.simulated {worker.engine.pause();worker.reset();}
-                    if worker.preferences.light_guide!=p.light_guide || worker.preferences.low!=p.low || worker.preferences.high!=p.high {worker.clear_guide();}worker.preferences=p;reply.send(()).ok();},
+                    if worker.preferences.light_guide!=p.light_guide || worker.preferences.low!=p.low || worker.preferences.high!=p.high {worker.clear_guide();}worker.audio.sender.set_muted(p.light_guide);worker.preferences=p;reply.send(()).ok();},
                     Command::Connect(id,reply)=>{let result=worker.connect(id,&midi_rx,midi_tx.clone(),dropped.clone());reply.send(result).ok();},
                     Command::ConnectOutput(id,reply)=>{let result=worker.connect_output(id);reply.send(result).ok();},
                     Command::TestLight(reply)=>{let result=worker.test_light();reply.send(result).ok();},

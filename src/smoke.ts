@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppStatus, Device, LibraryEntry } from "./types";
+import type { AppStatus, Device, LibraryEntry, Preferences } from "./types";
 
 // Explicitly opt-in native integration tests. The normal executable returns null
 // from smoke_config. No import, key injection, or test mutation runs in that case.
@@ -86,6 +86,36 @@ async function library() {
 }
 async function snapshot() {
   return invoke<AppStatus>("status");
+}
+async function audioSample(expectTone: boolean) {
+  const before = await snapshot();
+  assert(
+    before.audio_available,
+    `Native audio unavailable: ${before.audio_error}`,
+  );
+  await sleep(240);
+  const after = await snapshot();
+  const frames = after.audio_frames - before.audio_frames;
+  const nonzero = after.audio_nonzero_frames - before.audio_nonzero_frames;
+  assert(frames > 0, "Native audio callbacks stopped during the sample");
+  assert(
+    expectTone ? nonzero > 0 : nonzero === 0,
+    expectTone
+      ? "Expected native nonzero audio frames while PC monitoring is enabled"
+      : `Expected muted native output; observed ${nonzero} nonzero frames`,
+  );
+  return { frames, nonzero_frames: nonzero, audible_output_verified: false };
+}
+async function setGuide(enabled: boolean) {
+  const toggle = get<HTMLInputElement>('input[aria-label="Light Guide"]');
+  if (toggle.checked !== enabled) toggle.click();
+  await waitFor(`Light Guide ${enabled ? "on" : "off"}`, async () => {
+    const state = await snapshot();
+    return state.light_guide === enabled && toggle.checked === enabled;
+  });
+  // Allow the already-running audio callback and published counters to observe
+  // the native preference change before taking a steady-state output sample.
+  await sleep(100);
 }
 async function navigate(text: string, selector: string) {
   button(text, get("nav")).click();
@@ -247,6 +277,44 @@ export async function runNativeSmoke() {
           };
         },
       );
+      if (config.output_device_id) {
+        await check(
+          "saved Light Guide mutes native PC audio after restart",
+          async () => {
+            const preferences = await invoke<Preferences>("preferences");
+            assert(
+              preferences.light_guide &&
+                preferences.monitor === "software" &&
+                preferences.simulated,
+              "Guide/software-monitor/simulated preferences did not survive restart",
+            );
+            const before = await snapshot();
+            assert(
+              before.light_guide,
+              "Saved guide mute was not active at startup",
+            );
+            await invoke("input_note", { pitch: 60, on: true, velocity: 90 });
+            await waitFor("restarted simulated press monitored", async () =>
+              (await snapshot()).held.includes(60),
+            );
+            const sample = await audioSample(false);
+            await invoke("input_note", { pitch: 60, on: false, velocity: 0 });
+            const after = await snapshot();
+            assert(
+              after.transport.position_ms === before.transport.position_ms &&
+                after.transport.correct === before.transport.correct,
+              "Restart mute check changed saved practice position or score",
+            );
+            return {
+              source: "explicit simulated input through native input_note",
+              saved_light_guide: true,
+              saved_monitor: "software",
+              sample,
+              physical_keyboard_verified: false,
+            };
+          },
+        );
+      }
     } else {
       assert(
         config.paths.length >= 3,
@@ -647,12 +715,34 @@ export async function runNativeSmoke() {
             },
             5000,
           );
-          const toggle = inputByLabel("Light Guide");
-          if (!toggle.checked) toggle.click();
+          const software = inputByLabel("Through my computer");
+          if (!software.checked) software.click();
           await waitFor(
-            "guide enabled",
-            async () => (await snapshot()).light_guide,
+            "software monitoring selected through UI",
+            async () =>
+              (await invoke<Preferences>("preferences")).monitor === "software",
           );
+          await setGuide(false);
+          await invoke("input_note", { pitch: 60, on: true, velocity: 90 });
+          const beforeMute = await audioSample(true);
+          // The note remains held while the UI enables Light Guide: the mute
+          // must silence an existing voice as well as newly played PC tones.
+          await setGuide(true);
+          const heldToneMuted = await audioSample(false);
+          await invoke("input_note", { pitch: 60, on: false, velocity: 0 });
+          await invoke("input_note", { pitch: 61, on: true, velocity: 90 });
+          await waitFor("muted simulated press still monitored", async () =>
+            (await snapshot()).held.includes(61),
+          );
+          const newToneMuted = await audioSample(false);
+          await invoke("input_note", { pitch: 61, on: false, velocity: 0 });
+          await sleep(320);
+          await setGuide(false);
+          const releasedTonesRemainSilent = await audioSample(false);
+          await invoke("input_note", { pitch: 62, on: true, velocity: 90 });
+          const restoredTone = await audioSample(true);
+          await invoke("input_note", { pitch: 62, on: false, velocity: 0 });
+          await setGuide(true);
           await navigate("Practice", ".practice-view");
           button("Wait for me").click();
           button("Restart").click();
@@ -669,14 +759,26 @@ export async function runNativeSmoke() {
             });
           };
           const lit = await lightTarget();
+          for (const pitch of lit.transport.targets)
+            await invoke("input_note", { pitch, on: true, velocity: 90 });
           await sleep(350);
+          const targetToneMuted = await audioSample(false);
           const untouched = await snapshot();
           assert(
             untouched.transport.correct === lit.transport.correct &&
+              untouched.transport.wrong === lit.transport.wrong &&
+              untouched.transport.missed === lit.transport.missed &&
+              untouched.transport.position_ms === lit.transport.position_ms &&
               untouched.transport.waiting &&
               untouched.transport.matched.length === 0,
             "Guide output must not count as player input",
           );
+          assert(
+            untouched.lit_notes.join() === lit.lit_notes.join(),
+            "Muted simulated presses changed the guide target",
+          );
+          for (const pitch of lit.transport.targets)
+            await invoke("input_note", { pitch, on: false, velocity: 0 });
           button("Pause").click();
           await waitFor(
             "pause clears guide notes",
@@ -730,6 +832,16 @@ export async function runNativeSmoke() {
             output_device_id: config.output_device_id,
             messages_sent: state.output_messages,
             initial_targets: lit.lit_notes,
+            pc_audio: {
+              before_mute: beforeMute,
+              held_tone_muted: heldToneMuted,
+              new_tone_muted: newToneMuted,
+              released_tones_remain_silent: releasedTonesRemainSilent,
+              restored_tone: restoredTone,
+              target_tone_muted: targetToneMuted,
+              source: "explicit simulated input through native input_note",
+              saved_light_guide_for_restart: true,
+            },
             physical_illumination_verified: false,
             cleanup: [
               "test timeout",

@@ -1256,7 +1256,7 @@ export default function App() {
                     className="check guide-toggle"
                     title={
                       status.output_connected
-                        ? "Lights current practice targets in Wait for me and Timed. Listen sends no guide notes."
+                        ? "Lights current practice targets and mutes all PC audio. Listen sends no guide notes."
                         : "Connect a MIDI output in Keyboard & sound first."
                     }
                   >
@@ -1275,6 +1275,7 @@ export default function App() {
                       }
                     />
                     Light Guide
+                    {preferences.light_guide ? " · PC audio muted" : ""}
                   </label>
                   <button
                     className="small-button"
@@ -1869,8 +1870,9 @@ export default function App() {
                 </label>
                 <p className="help-text">
                   Light Guide sends only the current Wait for me or Timed
-                  practice targets. Listen sends no guide notes. Note messages
-                  may also sound the keyboard.
+                  practice targets and mutes all Keyloom audio on your PC. Hear
+                  your Yamaha while you play. Listen sends no guide notes; MIDI
+                  note messages may still sound the keyboard.
                 </p>
                 <p className="help-text">
                   Keep MIDI Thru or echo disabled in other apps. Returned MIDI
@@ -1901,8 +1903,8 @@ export default function App() {
                     ? "Middle C test active"
                     : status.light_guide
                       ? status.transport.mode === "listen"
-                        ? "Light Guide on · silent in Listen"
-                        : "Light Guide on · follows current targets"
+                        ? "Light Guide on · PC audio muted · no targets in Listen"
+                        : "Light Guide on · PC audio muted · follows current targets"
                       : "Light Guide off"}
                   <small>
                     Notes sent:{" "}
@@ -1963,8 +1965,9 @@ export default function App() {
                   <span>
                     <strong>Through my computer</strong>
                     <small>
-                      Hear a basic synthesized practice tone. Turn down the
-                      Yamaha to avoid doubled notes.
+                      {preferences.light_guide
+                        ? "PC audio is muted while Light Guide is on. This listening preference is saved for when Light Guide is off."
+                        : "Hear a basic synthesized practice tone. Turn down the Yamaha to avoid doubled notes."}
                     </small>
                   </span>
                 </label>
@@ -1973,13 +1976,15 @@ export default function App() {
                     className={`connection-dot ${status.audio_available ? "connected" : ""}`}
                   />
                   {status.audio_available
-                    ? "Native audio output available · basic practice tone"
+                    ? preferences.light_guide
+                      ? "PC audio muted · Light Guide is on"
+                      : "Native audio output available · basic practice tone"
                     : status.audio_error || "Audio output not available"}
                 </p>
                 <p className="help-text">
-                  Arrangement playback uses PC audio. No SoundFont or sampled
-                  piano is bundled. MIDI Thru is off. Light Guide uses the
-                  separately connected keyboard output.
+                  Light Guide mutes PC note monitoring, arrangement playback,
+                  count-in and metronome. Switch it off to restore PC audio. No
+                  SoundFont or sampled piano is bundled. MIDI Thru is off.
                 </p>
               </section>
               <section className="settings-card">

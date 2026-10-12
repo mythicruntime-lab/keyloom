@@ -4,7 +4,7 @@ An original, offline Windows piano trainer built with Tauri 2, Rust, React, Type
 
 ## Run
 
-In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.1.2-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.2_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
+In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.1.3-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.3_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
 
 Windows 11 x64 and the installed Microsoft Edge WebView2 Evergreen Runtime are required. WebView2 is already present on the development machine. The package does not download or install it. No administrator access, Python, Node, Rust, account, server, internet connection or NVIDIA setting change is needed to run the built app.
 
@@ -24,6 +24,8 @@ In **Keyboard & sound**, choose the USB interface under **MIDI output**, then **
 
 Guide notes clear on pause, stop, seek, song/settings changes, guide disable, output disconnect, Panic and normal app exit. Reconnecting sends channel-1 Note Offs to clear interrupted notes. Keep other apps' MIDI Thru/echo off: returned MIDI has no marker proving whether it came from physical keys. Keyloom never routes guidance internally into player input, and simulated on-screen/computer keys now monitor only; they cannot satisfy targets or score.
 
+**Light Guide mutes all Keyloom PC audio** so you can listen to the Yamaha: key-press tones, Listen/accompaniment, count-in and metronome are silent while the toggle is on. Turn Light Guide off to restore PC audio. Your Yamaha/computer listening choice is retained, and the mute survives restart. This changes PC sound only; MIDI guide notes may still sound the Yamaha itself.
+
 ## Library and files
 
 Normal application data lives under `%LOCALAPPDATA%\app.keyloom.desktop`: `library.sqlite3`, managed `midi` originals and preferences. Source files are copied, never moved. Byte-identical files share one entry; different arrangements remain separate. Export writes the exact original bytes to a **new** destination filename. Removal asks for confirmation and deletes only the managed copy/record, never the external original. Keep the data directory when updating. Uninstall can retain this library; do not select an offered application-data deletion option if you want to keep your songs.
@@ -33,7 +35,7 @@ MIDI 0/1 with musical tick division are supported. Type 2 and SMPTE division rec
 Open a file directly:
 
 ```powershell
-& .\artifacts\Keyloom-0.1.2-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
+& .\artifacts\Keyloom-0.1.3-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
 ```
 
 A second launch forwards the file to the running instance. During interactive installation you can optionally add Keyloom to Windows **Open with** for MIDI; the installer does not replace your default application. Silent installation skips that optional registration. Uninstall removes its own ordinary shortcuts. If you manually pinned Keyloom to the taskbar, unpin it manually after uninstall.

@@ -1,5 +1,9 @@
 # Yamaha verification
 
+## PC audio mute — 12 October 2026
+
+0.1.3 passed native callback checks for zero PC samples with Light Guide on, sound returning with it off, and saved mute after restart. Inputs for those automated checks were explicitly simulated. The owner listening check is pending: select Through my computer, play physical Yamaha keys with Light Guide on (PC silent, Yamaha audible), then with Light Guide off (PC tone returns), and leave the guide on. This does not verify silent Yamaha guide notes or replace the earlier optical checks.
+
 ## Owner-reported results — 11 October 2026
 
 The owner reports that **Wait for me works well on the Yamaha** and that **reconnecting works well**. The owner does not have a pedal, so physical pedal testing is not applicable to this setup. These are owner-reported playing results, separate from the automated evidence below; the individual edge cases have not all been confirmed.

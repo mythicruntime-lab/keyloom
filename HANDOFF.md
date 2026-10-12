@@ -2,9 +2,9 @@
 
 ## Current follow-up — 12 October 2026
 
-The owner requested less overlapping sound with Light Guide and clarified: "if the yamaha has the lights on keyloom stops play on notehit". Clarification is pending between releasing each guide note when its physical key is pressed and suppressing PC input-monitoring tones while guidance is enabled. Existing saved monitoring is already `yamaha` (PC key-press monitoring off). No new sound or guide behavior has been applied; 0.1.2 remains the physically verified build below. Do not mark silent illumination or the requested note-hit change verified from the earlier hardware checks.
+The owner clarified that Light Guide should mute Keyloom's PC tone while they listen to the Yamaha. Version 0.1.3 applies a PC master mute while the saved Light Guide toggle is on, including already sounding/new input tones, arrangement playback and clicks. Turning it off restores PC audio while keeping the listening preference. MIDI messages, physical input and matching remain unchanged. This does not claim silent Yamaha illumination; guide Note Ons can still sound the keyboard.
 
-Added `CHANGELOG.md` for the existing local releases and included it in both package resource lists. The unchanged baseline passed 102 Rust test executions on 12 October (one optional benchmark ignored). Switchwall tools remain unavailable. No public push or remote is configured.
+`CHANGELOG.md` covers the local releases and ships in both package formats. Version 0.1.3 passed 102 Rust test executions, strict Clippy, formatting, TypeScript/build, and nine real native exercise checks plus two restart checks. Actual audio callbacks emitted zero nonzero samples with guidance on and resumed tones with it off; simulated keys remained unable to score. See `docs/test-report.md` for measured counters. A new owner listening check is pending; the earlier 0.1.2 hardware results below do not establish the new PC mute's audible behavior. Switchwall tools remain unavailable. No public push or remote is configured.
 
 ## Delivered state
 
@@ -18,8 +18,8 @@ The 0.1.1 display update gives the strike line a fixed bright pink band, pale sh
 
 ## Run and build
 
-- Run `artifacts/Keyloom-0.1.2-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.2_x64-setup.exe`.
-- Portable ZIP: `artifacts/Keyloom-0.1.2-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
+- Run `artifacts/Keyloom-0.1.3-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.1.3_x64-setup.exe`.
+- Portable ZIP: `artifacts/Keyloom-0.1.3-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
 - From this checkout: `powershell -File scripts/Launch.ps1`.
 - Restore/build: `powershell -File scripts/Build.ps1 -Mode restore`, then `powershell -File scripts/Build.ps1 -Mode package -Jobs 2`.
 - Built apps need Windows x64 and installed WebView2; no development tools, Python, network, account or administrator access. These builds are unsigned.

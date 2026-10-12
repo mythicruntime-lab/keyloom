@@ -1,5 +1,27 @@
 # Keyloom verification
 
+## 0.1.3 Light Guide PC mute — 12 October 2026
+
+Light Guide now controls an atomic PC master mute in the native audio callback. It covers held/new monitoring voices, scheduled playback and clicks, while note releases/envelopes continue to progress. The saved listening preference, MIDI guidance and physical-only scoring are unchanged. No dependencies or assets were added. This is PC audio muting, not a silent-LED protocol for the Yamaha.
+
+All **102 Rust test executions** passed (54 unit + 48 integration; the optional benchmark remained ignored). Strict Clippy, Rust formatting, Prettier, TypeScript and the Windows production build passed. Read-only review found no blocking regressions.
+
+The actual release application passed **nine native exercise checks and two restart checks** in `test-output/pc-mute-013`: 10,282.9 ms exercise and 533.9 ms restart. The same run exercised real import-to-library-to-play, metadata/settings persistence, USB MIDI input/output, target isolation and cleanup. It sent 142 channel-1 messages, including the 128-note recovery baseline, with no output error. The normal library still showed five arrangements; test imports used an isolated library.
+
+With software monitoring selected through the UI, explicitly simulated input produced these native WASAPI callback counters:
+
+| Check | Callback frames sampled | Nonzero frames |
+| --- | ---: | ---: |
+| Before mute | 11,520 | 11,039 |
+| Existing held tone after guide enabled | 11,520 | 0 |
+| New tone while guide enabled | 12,960 | 0 |
+| Released notes after guide disabled | 11,520 | 0 |
+| Fresh tone after guide disabled | 12,480 | 11,039 |
+| Simulated target presses while guide enabled | 12,000 | 0 |
+| Saved guide mute after app restart | 12,480 | 0 |
+
+Callbacks continued throughout muted samples. Simulated target presses did not advance position, change scores or alter the lit target. No stale released-note backlog played on unmute. These are actual native audio sample measurements, not microphone recordings or proof of physical-keyboard audibility. Muted Listen/count-in/metronome share the same final sample gate but were not separately exercised in the new native checks. A new owner listening check is pending; the 0.1.2 optical/physical results below remain separate.
+
 ## 0.1.2 Yamaha Light Guide — 11 October 2026
 
 **Physical acceptance passed with the owner on a Yamaha EZ-150 through USB MIDI Interface.** The owner confirmed the adapter OUT → keyboard IN connection and keyboard Light Guide setting; then observed middle C light and turn off after about two seconds. In First threads/Wait for me, the owner confirmed no hands-off advancement, correct advancement only after playing the physical keys, and illumination of the next targets. The owner then confirmed that pause, stop and opening a different song each cleared the physical lights. These are explicit owner observations; native status alone cannot prove LEDs or sound.

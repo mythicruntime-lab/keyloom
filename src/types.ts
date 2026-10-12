@@ -143,6 +143,8 @@ export interface AppStatus {
   output_messages: number;
   audio_available: boolean;
   audio_error: string | null;
+  audio_frames: number;
+  audio_nonzero_frames: number;
   events: MidiEvent[];
   held: number[];
   dropped_events: number;
@@ -188,6 +190,8 @@ export const EMPTY_STATUS: AppStatus = {
   output_messages: 0,
   audio_available: false,
   audio_error: null,
+  audio_frames: 0,
+  audio_nonzero_frames: 0,
   events: [],
   held: [],
   dropped_events: 0,

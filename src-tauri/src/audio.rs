@@ -25,9 +25,16 @@ pub struct AudioSender {
     queue: Arc<ArrayQueue<Sound>>,
     reset: Arc<AtomicBool>,
     enabled: Arc<AtomicBool>,
+    muted: Arc<AtomicBool>,
     pub dropped: Arc<AtomicU64>,
 }
 impl AudioSender {
+    /// Mute only the PC output. Voices still consume note-offs and advance their
+    /// envelopes, so unmuting resumes current voices without replaying a backlog.
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Release);
+    }
+
     pub fn send(&self, sound: Sound) {
         // Yamaha-speaker practice remains usable without a Windows audio device.
         // A dead callback must not accumulate an unconsumed queue or cause a
@@ -78,6 +85,7 @@ impl Audio {
             // the callback so a concurrent error can only disable it; success
             // must never overwrite a callback's failure with true.
             enabled: Arc::new(AtomicBool::new(true)),
+            muted: Arc::new(AtomicBool::new(false)),
             dropped: Arc::new(AtomicU64::new(0)),
         };
         let error = Arc::new(AtomicBool::new(false));
@@ -238,6 +246,9 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                 frames.fetch_add((buffer.len() / channels) as u64, Ordering::Relaxed);
                 return;
             }
+            // Read once per callback: a preference change takes effect by the
+            // next output buffer, without locks, allocation or MIDI side effects.
+            let muted = sender.muted.load(Ordering::Acquire);
             let mut nonzero = 0_u64;
             for frame in buffer.chunks_mut(channels) {
                 let mut sample = 0.0_f32;
@@ -261,7 +272,11 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                             * v.envelope;
                     v.phase = (v.phase + v.step).fract();
                 }
-                let limited = sample / (1.0 + sample.abs());
+                let limited = if muted {
+                    0.0
+                } else {
+                    sample / (1.0 + sample.abs())
+                };
                 if limited.abs() > 0.000_001 {
                     nonzero += 1;
                 }
@@ -288,6 +303,7 @@ mod tests {
             queue: Arc::new(ArrayQueue::new(2)),
             reset: Arc::new(AtomicBool::new(false)),
             enabled: Arc::new(AtomicBool::new(enabled)),
+            muted: Arc::new(AtomicBool::new(false)),
             dropped: Arc::new(AtomicU64::new(0)),
         }
     }
