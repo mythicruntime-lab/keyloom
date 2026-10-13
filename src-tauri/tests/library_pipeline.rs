@@ -12,7 +12,7 @@ mod parser;
 mod transport;
 
 use library::Library;
-use model::PartSetting;
+use model::{LessonToolRequest, PartSetting, ThinStrategy};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1394,4 +1394,573 @@ fn edited_export_reimports_and_plays_while_original_bytes_and_existing_files_sta
         assert_eq!(library.variant_state(&variant.id).unwrap(), state_before);
         assert_eq!(stored_variant_json(&root, &variant.id), edits_before);
     }
+}
+
+fn tool_chords_fixture() -> Vec<u8> {
+    fixtures::smf(
+        1,
+        480,
+        &[
+            fixtures::track(vec![
+                (0, vec![0x90, 60, 80]),
+                (0, vec![0x90, 64, 80]),
+                (0, vec![0x90, 72, 80]),
+                (0, vec![0x90, 72, 80]),
+                (1, vec![0x90, 67, 80]),
+                (119, vec![0x80, 60, 0]),
+                (0, vec![0x80, 64, 0]),
+                (0, vec![0x80, 72, 0]),
+                (0, vec![0x80, 72, 0]),
+                (0, vec![0x80, 67, 0]),
+                (120, vec![0x90, 65, 80]),
+                (0, vec![0x90, 65, 80]),
+                (120, vec![0x80, 65, 0]),
+                (0, vec![0x80, 65, 0]),
+                (0, vec![0xff, 0x2f, 0]),
+            ]),
+            fixtures::track(vec![
+                (0, vec![0x91, 48, 80]),
+                (0, vec![0x91, 72, 80]),
+                (120, vec![0x81, 48, 0]),
+                (0, vec![0x81, 72, 0]),
+                (120, vec![0x91, 65, 80]),
+                (120, vec![0x81, 65, 0]),
+                (0, vec![0xff, 0x2f, 0]),
+            ]),
+            fixtures::track(vec![
+                (0, vec![0x99, 36, 80]),
+                (0, vec![0x99, 42, 80]),
+                (120, vec![0x89, 36, 0]),
+                (0, vec![0x89, 42, 0]),
+                (120, vec![0x99, 38, 80]),
+                (120, vec![0x89, 38, 0]),
+                (0, vec![0xff, 0x2f, 0]),
+            ]),
+        ],
+    )
+}
+
+fn variant_row(root: &Path, id: &str) -> Vec<rusqlite::types::Value> {
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    let mut statement = db
+        .prepare("SELECT * FROM variants WHERE 'variant-'||variant_id=?1")
+        .unwrap();
+    let columns = statement.column_count();
+    statement
+        .query_row([id], |row| {
+            (0..columns).map(|index| row.get(index)).collect()
+        })
+        .unwrap()
+}
+
+fn thin(strategy: ThinStrategy, max_notes: u8, part_id: Option<u32>) -> LessonToolRequest {
+    LessonToolRequest::Thin {
+        strategy,
+        max_notes,
+        part_id,
+    }
+}
+
+#[test]
+fn tool_previews_group_exact_ticks_deterministically_across_pitched_parts_without_writes() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let bytes = tool_chords_fixture();
+    let source = directory.write("chords.mid", &bytes);
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Preview only")
+        .unwrap();
+    let song = library.load(&variant.id).unwrap();
+    let first_part = song.notes.iter().find(|note| note.id == 0).unwrap().part_id;
+    let second_part = song.notes.iter().find(|note| note.id == 7).unwrap().part_id;
+    let before = variant_row(&root, &variant.id);
+    let original_before = original_row(&root, &original.id);
+    let cases = [
+        (
+            thin(ThinStrategy::Highest, 1, None),
+            vec![0, 1, 3, 6, 7, 8, 9],
+        ),
+        (
+            thin(ThinStrategy::BassHighest, 2, None),
+            vec![0, 1, 3, 6, 8, 9],
+        ),
+        // Limit counts note events: both tied high notes survive before ID 8.
+        (thin(ThinStrategy::Limit, 2, None), vec![0, 1, 7, 8, 9]),
+        (
+            thin(ThinStrategy::Highest, 1, Some(first_part)),
+            vec![0, 1, 3, 6],
+        ),
+        (thin(ThinStrategy::Highest, 1, Some(second_part)), vec![7]),
+    ];
+    for (request, expected) in cases {
+        let preview = library.preview_tool(&variant.id, &request, 0).unwrap();
+        assert_eq!(
+            preview,
+            library.preview_tool(&variant.id, &request, 0).unwrap()
+        );
+        assert_eq!(preview.revision, 0);
+        assert_eq!(
+            preview
+                .changes
+                .iter()
+                .map(|change| change.note_id)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for change in &preview.changes {
+            assert_eq!(change.to_pitch, None);
+            assert_eq!(
+                change.from_pitch,
+                song.notes
+                    .iter()
+                    .find(|note| note.id == change.note_id)
+                    .unwrap()
+                    .pitch
+            );
+            assert_ne!(change.note_id, 4, "one-tick-later onset is its own chord");
+            assert!(change.note_id < 10, "percussion is excluded");
+        }
+        assert_eq!(
+            serde_json::to_value(&preview).unwrap()["changes"][0]["to_pitch"],
+            serde_json::Value::Null
+        );
+    }
+    // Dropping a preview is Cancel: there is no pending state or stored edit.
+    assert_eq!(variant_row(&root, &variant.id), before);
+    assert_eq!(original_row(&root, &original.id), original_before);
+    assert_eq!(library.load(&variant.id).unwrap(), song);
+    assert_eq!(fs::read(&source).unwrap(), bytes);
+    drop(library);
+    let library = Library::open(root.clone()).unwrap();
+    assert_eq!(variant_row(&root, &variant.id), before);
+    assert_eq!(library.load(&variant.id).unwrap(), song);
+}
+
+#[test]
+fn tool_noops_and_invalid_requests_never_advance_revision_or_history() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("chords.mid", &tool_chords_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library.create_variant(&original.id, "Validation").unwrap();
+    let song = library.load(&variant.id).unwrap();
+    let drums = song.parts.iter().find(|part| part.percussion).unwrap().id;
+    let before = variant_row(&root, &variant.id);
+    for request in [
+        thin(ThinStrategy::Limit, 8, None),
+        LessonToolRequest::Shift {
+            note_ids: vec![],
+            semitones: 12,
+        },
+    ] {
+        assert!(library
+            .preview_tool(&variant.id, &request, 0)
+            .unwrap()
+            .changes
+            .is_empty());
+        assert!(library
+            .apply_tool(&variant.id, &request, 0)
+            .unwrap_err()
+            .contains("would not change"));
+    }
+    for request in [
+        thin(ThinStrategy::Limit, 0, None),
+        thin(ThinStrategy::Highest, 9, None),
+        thin(ThinStrategy::BassHighest, 2, Some(drums)),
+        thin(ThinStrategy::Highest, 1, Some(u32::MAX)),
+        LessonToolRequest::Shift {
+            note_ids: vec![0],
+            semitones: 1,
+        },
+        LessonToolRequest::Shift {
+            note_ids: vec![0],
+            semitones: i16::MIN,
+        },
+        LessonToolRequest::Shift {
+            note_ids: vec![0, 0],
+            semitones: 12,
+        },
+        LessonToolRequest::Shift {
+            note_ids: vec![0, u32::MAX],
+            semitones: 12,
+        },
+        LessonToolRequest::Shift {
+            note_ids: vec![0; parser::MAX_NOTES + 1],
+            semitones: 12,
+        },
+    ] {
+        assert!(library.preview_tool(&variant.id, &request, 0).is_err());
+        assert!(library.apply_tool(&variant.id, &request, 0).is_err());
+        assert_eq!(variant_row(&root, &variant.id), before);
+    }
+    let request = thin(ThinStrategy::Highest, 1, None);
+    assert!(library.preview_tool(&original.id, &request, 0).is_err());
+    assert!(library.apply_tool(&original.id, &request, 0).is_err());
+    assert!(library.preview_tool(&variant.id, &request, 1).is_err());
+    assert!(library.apply_tool(&variant.id, &request, 1).is_err());
+    assert_eq!(variant_row(&root, &variant.id), before);
+    let all: Vec<_> = song.notes.iter().map(|note| note.id).collect();
+    library.remove_notes(&variant.id, 0, &all).unwrap();
+    let empty_before = variant_row(&root, &variant.id);
+    assert!(library
+        .preview_tool(&variant.id, &request, 1)
+        .unwrap()
+        .changes
+        .is_empty());
+    assert!(library.apply_tool(&variant.id, &request, 1).is_err());
+    assert_eq!(variant_row(&root, &variant.id), empty_before);
+}
+
+#[test]
+fn octave_preview_and_apply_validate_whole_batch_and_use_current_effective_pitches() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let mut events = Vec::new();
+    for pitch in [0, 60, 127] {
+        events.push((0, vec![0x90, pitch, 80]));
+        events.push((120, vec![0x80, pitch, 0]));
+    }
+    events.push((0, vec![0xff, 0x2f, 0]));
+    let source = directory.write(
+        "boundary.mid",
+        &fixtures::smf(0, 480, &[fixtures::track(events)]),
+    );
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library.create_variant(&original.id, "Octaves").unwrap();
+    let before = variant_row(&root, &variant.id);
+    for request in [
+        LessonToolRequest::Shift {
+            note_ids: vec![1, 2],
+            semitones: 12,
+        },
+        LessonToolRequest::Shift {
+            note_ids: vec![1, 0],
+            semitones: -12,
+        },
+    ] {
+        assert!(library.preview_tool(&variant.id, &request, 0).is_err());
+        assert!(library.apply_tool(&variant.id, &request, 0).is_err());
+        assert_eq!(variant_row(&root, &variant.id), before);
+    }
+    library.transpose_notes(&variant.id, 0, &[1], 1).unwrap();
+    let request: LessonToolRequest =
+        serde_json::from_str(r#"{"kind":"shift","note_ids":[1,0],"semitones":12}"#).unwrap();
+    let preview = library.preview_tool(&variant.id, &request, 1).unwrap();
+    assert_eq!(
+        preview.changes,
+        vec![
+            model::NoteChange {
+                note_id: 0,
+                from_pitch: 0,
+                to_pitch: Some(12)
+            },
+            model::NoteChange {
+                note_id: 1,
+                from_pitch: 61,
+                to_pitch: Some(73)
+            },
+        ]
+    );
+    library.apply_tool(&variant.id, &request, 1).unwrap();
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    let shifted = library.load(&variant.id).unwrap();
+    assert_eq!(
+        shifted
+            .notes
+            .iter()
+            .map(|note| note.pitch)
+            .collect::<Vec<_>>(),
+        [12, 73, 127]
+    );
+    library.undo_notes(&variant.id, 2).unwrap();
+    assert_eq!(
+        library
+            .load(&variant.id)
+            .unwrap()
+            .notes
+            .iter()
+            .map(|note| note.pitch)
+            .collect::<Vec<_>>(),
+        [0, 61, 127]
+    );
+    library.remove_notes(&variant.id, 3, &[1]).unwrap();
+    let before_removed = variant_row(&root, &variant.id);
+    assert!(library.preview_tool(&variant.id, &request, 4).is_err());
+    assert!(library.apply_tool(&variant.id, &request, 4).is_err());
+    assert_eq!(variant_row(&root, &variant.id), before_removed);
+}
+
+#[test]
+fn stale_tool_apply_refuses_other_connections_edit_and_recomputes_new_revision() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("chords.mid", &tool_chords_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Concurrent preview")
+        .unwrap();
+    let request = thin(ThinStrategy::Highest, 1, None);
+    let old = library.preview_tool(&variant.id, &request, 0).unwrap();
+    assert!(!old.changes.iter().any(|change| change.note_id == 2));
+    let mut other = Library::open(root.clone()).unwrap();
+    other.transpose_notes(&variant.id, 0, &[0], 12).unwrap();
+    let before = variant_row(&root, &variant.id);
+    assert!(library
+        .apply_tool(&variant.id, &request, old.revision)
+        .is_err());
+    assert_eq!(variant_row(&root, &variant.id), before);
+    let fresh = library.preview_tool(&variant.id, &request, 1).unwrap();
+    assert!(fresh.changes.iter().any(|change| change.note_id == 2));
+    assert!(!fresh.changes.iter().any(|change| change.note_id == 0));
+    library.apply_tool(&variant.id, &request, 1).unwrap();
+    let song = library.load(&variant.id).unwrap();
+    assert_eq!(
+        song.notes.iter().map(|note| note.id).collect::<Vec<_>>(),
+        [0, 10, 11, 4, 5, 12]
+    );
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    library.undo_notes(&variant.id, 2).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap().notes.len(), 13);
+    assert_eq!(library.load(&variant.id).unwrap().notes[0].pitch, 72);
+}
+
+#[test]
+fn tools_share_legacy_compatible_mixed_undo_and_export_reimport_without_schema_changes() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let bytes = tool_chords_fixture();
+    let source = directory.write("chords.mid", &bytes);
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let original_song = library.load(&original.id).unwrap();
+    let original_before = original_row(&root, &original.id);
+    let variant = library.create_variant(&original.id, "Mixed tools").unwrap();
+    let settings = model::SongSettings {
+        speed: 0.5,
+        ..Default::default()
+    };
+    library.save_settings(&variant.id, &settings).unwrap();
+    library.remove_notes(&variant.id, 0, &[12]).unwrap();
+    let removed = library.load(&variant.id).unwrap();
+    drop(library);
+    // Emulate a saved removal-only version from before mixed history existed.
+    // The production startup reinstalls the trigger after this fixture setup.
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    db.execute_batch("DROP TRIGGER protect_mixed_variant_history;")
+        .unwrap();
+    db.execute(
+        "UPDATE variants SET undo_json='[[12]]' WHERE 'variant-'||variant_id=?1",
+        [&variant.id],
+    )
+    .unwrap();
+    let columns_before: Vec<String> = db
+        .prepare("PRAGMA table_info(variants)")
+        .unwrap()
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let schema_before: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    drop(db);
+    let mut library = Library::open(root.clone()).unwrap();
+    let shift = LessonToolRequest::Shift {
+        note_ids: vec![2],
+        semitones: 12,
+    };
+    library.apply_tool(&variant.id, &shift, 1).unwrap();
+    let shifted = library.load(&variant.id).unwrap();
+    let request: LessonToolRequest = serde_json::from_str(
+        r#"{"kind":"thin","strategy":"highest","max_notes":1,"part_id":null}"#,
+    )
+    .unwrap();
+    library.apply_tool(&variant.id, &request, 2).unwrap();
+    let thinned = library.load(&variant.id).unwrap();
+    let history: serde_json::Value =
+        serde_json::from_str(&stored_variant_json(&root, &variant.id).1).unwrap();
+    assert_eq!(history["version"], 1);
+    assert_eq!(history["operations"].as_array().unwrap().len(), 3);
+    assert_eq!(history["operations"][0]["kind"], "remove");
+    assert_eq!(history["operations"][1]["kind"], "pitch");
+    assert_eq!(history["operations"][2]["kind"], "remove");
+    let exported = directory.path().join("tool result.mid");
+    library.export(&variant.id, &exported).unwrap();
+    let imported = library.import_path(&exported).unwrap();
+    assert!(!imported.duplicate);
+    let round_trip = library.load(&imported.entry.id).unwrap();
+    let mut expected = thinned.clone();
+    assert_eq!(expected.notes.len(), round_trip.notes.len());
+    for (expected, actual) in expected.notes.iter_mut().zip(&round_trip.notes) {
+        expected.id = actual.id;
+    }
+    assert_eq!(round_trip.notes, expected.notes);
+    assert_eq!(round_trip.tempos, expected.tempos);
+    assert_eq!(round_trip.duration_ms, expected.duration_ms);
+    let mut engine = transport::Engine::new();
+    engine.load(round_trip, library.settings(&imported.entry.id).unwrap());
+    engine.play();
+    assert!(engine
+        .advance(100.0)
+        .iter()
+        .any(|event| matches!(event, transport::VoiceEvent::On { pitch: 84, .. })));
+    drop(library);
+    let mut library = Library::open(root.clone()).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), thinned);
+    library.undo_notes(&variant.id, 3).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), shifted);
+    library.undo_notes(&variant.id, 4).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), removed);
+    library.undo_notes(&variant.id, 5).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), original_song);
+    assert!(
+        !library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .can_undo
+    );
+    assert_eq!(library.settings(&variant.id).unwrap(), settings);
+    assert_eq!(
+        library.settings(&original.id).unwrap(),
+        model::SongSettings::default()
+    );
+    assert_eq!(original_row(&root, &original.id), original_before);
+    assert_eq!(fs::read(source).unwrap(), bytes);
+    assert_eq!(
+        fs::read(root.join("midi").join(format!("{}.mid", original.id))).unwrap(),
+        bytes
+    );
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    let columns_after: Vec<String> = db
+        .prepare("PRAGMA table_info(variants)")
+        .unwrap()
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let schema_after: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(columns_after, columns_before);
+    assert_eq!(schema_after, schema_before);
+}
+
+#[test]
+fn thinning_a_large_unison_chord_is_one_bounded_undo_batch() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let count = 10_000;
+    let mut events = vec![(0, vec![0x90, 60, 80]); count];
+    events.push((120, vec![0x80, 60, 0]));
+    events.extend(vec![(0, vec![0x80, 60, 0]); count - 1]);
+    events.push((0, vec![0xff, 0x2f, 0]));
+    let source = directory.write(
+        "large chord.mid",
+        &fixtures::smf(0, 480, &[fixtures::track(events)]),
+    );
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library.create_variant(&original.id, "One chord").unwrap();
+    let request = thin(ThinStrategy::BassHighest, 2, None);
+    let preview = library.preview_tool(&variant.id, &request, 0).unwrap();
+    assert_eq!(preview.changes.len(), count - 1);
+    assert_eq!(preview.changes[0].note_id, 1);
+    library.apply_tool(&variant.id, &request, 0).unwrap();
+    let thinned = library.load(&variant.id).unwrap();
+    assert_eq!(thinned.notes.len(), 1);
+    assert_eq!(thinned.notes[0].id, 0);
+    let history: serde_json::Value =
+        serde_json::from_str(&stored_variant_json(&root, &variant.id).1).unwrap();
+    assert_eq!(history["operations"].as_array().unwrap().len(), 1);
+    drop(library);
+    let mut library = Library::open(root).unwrap();
+    library.undo_notes(&variant.id, 1).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap().notes.len(), count);
+    assert!(
+        !library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .can_undo
+    );
+}
+
+#[test]
+fn scoped_thinning_uses_sparse_edited_pitches_and_preserves_every_other_part() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("chords.mid", &tool_chords_fixture());
+    let mut library = Library::open(root).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Sparse scoped edit")
+        .unwrap();
+    library.remove_notes(&variant.id, 0, &[2, 6]).unwrap();
+    library.transpose_notes(&variant.id, 1, &[0], 12).unwrap();
+    let before = library.load(&variant.id).unwrap();
+    let scope = before
+        .notes
+        .iter()
+        .find(|note| note.id == 0)
+        .unwrap()
+        .part_id;
+    let request = thin(ThinStrategy::Highest, 1, Some(scope));
+    let preview = library.preview_tool(&variant.id, &request, 2).unwrap();
+    assert_eq!(
+        preview.changes,
+        vec![
+            model::NoteChange {
+                note_id: 1,
+                from_pitch: 64,
+                to_pitch: None
+            },
+            model::NoteChange {
+                note_id: 3,
+                from_pitch: 72,
+                to_pitch: None
+            },
+        ]
+    );
+    assert_eq!(library.load(&variant.id).unwrap(), before);
+    library.apply_tool(&variant.id, &request, 2).unwrap();
+    let after = library.load(&variant.id).unwrap();
+    let mut expected = before.clone();
+    expected.notes.retain(|note| note.id != 1 && note.id != 3);
+    expected
+        .parts
+        .iter_mut()
+        .find(|part| part.id == scope)
+        .unwrap()
+        .note_count -= 2;
+    assert_eq!(after, expected);
+    assert_eq!(
+        after.notes.iter().find(|note| note.id == 0).unwrap().pitch,
+        72
+    );
+    library.undo_notes(&variant.id, 3).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), before);
+    let state = library.variant_state(&variant.id).unwrap().unwrap();
+    assert_eq!(state.removed_count, 2);
+    assert_eq!(state.shifted_count, 1);
+    assert!(state.can_undo);
 }

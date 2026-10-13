@@ -2,6 +2,13 @@
 
 User-visible changes to Keyloom are recorded here. Version dates refer to local releases; no public release is implied.
 
+## 0.4.0 — 2026-10-12
+
+- Added previewed chord thinning across all pitched parts jointly or a chosen part: highest note, bass plus highest distinct pitches, or the highest 1–8 note events at each exact onset tick. Percussion is excluded; ties use stable note IDs. This is a simplification heuristic, not melody extraction.
+- Added whole-song selection below, above or outside configured keyboard limits, plus octave-move previews, independent of the visible note page/filter.
+- Show exact paginated changes and a Before/After roll. Apply revalidates the saved revision and saves one Undo action on the practice copy; cancel leaves the lesson unchanged.
+- Kept immediate pitch controls, schema-3 saves, Undo bounds and edited MIDI export behavior. No dependency changes. Windows builds/packages and 141 Rust executions passed; generated and easy-MIDI native workflows each passed 13 exercise and three restart checks. New physical acceptance remains pending; timing/duration editing, recording and M5–M6 remain deferred.
+
 ## 0.3.0 — 2026-10-12
 
 - Added selected-note moves by one semitone or one octave in either direction. Repeated moves retain selection; moves crossing MIDI 0–127 are refused as a whole, while keyboard-range warnings remain advisory.

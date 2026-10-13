@@ -1989,6 +1989,9 @@ main:has(> .import-banner) .practice-body {
 .piano-roll.note-editing {
   cursor: crosshair;
 }
+.piano-roll.is-preview {
+  cursor: default;
+}
 .lesson-editor {
   width: 330px;
   flex-shrink: 0;
@@ -2141,6 +2144,128 @@ main:has(> .import-banner) .practice-body {
 }
 .lesson-note-list > .help-text {
   padding: 12px;
+}
+.lesson-tools {
+  border: 1px solid #40595b;
+  border-radius: 6px;
+  background: #182d34;
+}
+.lesson-tools summary {
+  padding: 10px;
+  color: #c8e5d8;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+.lesson-tools-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px 11px;
+}
+.lesson-tools .field-label {
+  display: block;
+}
+.lesson-tools .field-label select {
+  width: 100%;
+  max-width: none;
+  margin-top: 5px;
+}
+.lesson-tools input[type="number"] {
+  width: 65px;
+  padding: 5px 7px;
+  margin-left: 8px;
+  font-size: 11px;
+}
+.lesson-range-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid #3b535b;
+}
+.lesson-range-tools > strong {
+  font-size: 11px;
+  color: #d0e3d8;
+}
+.lesson-range-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lesson-range-selection > button:first-child {
+  width: 100%;
+}
+.lesson-tool-preview {
+  border: 1px solid #779b88;
+  border-radius: 6px;
+  background: #1b3637;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lesson-preview-title,
+.lesson-preview-display,
+.lesson-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lesson-preview-title {
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #dcebcf;
+}
+.lesson-preview-title > span {
+  color: #e7cba4;
+  font-size: 10px;
+}
+.lesson-preview-display {
+  justify-content: flex-start;
+}
+.lesson-preview-display [aria-pressed="true"] {
+  border-color: #8dd9c5;
+  background: #315d4e;
+  color: #e5f4de;
+}
+.lesson-preview-list {
+  min-height: 60px;
+  max-height: 255px;
+  overflow-y: auto;
+  border: 1px solid #365a56;
+  border-radius: 5px;
+  background: #152b31;
+}
+.lesson-preview-list > .help-text {
+  padding: 10px;
+}
+.lesson-preview-change {
+  padding: 8px;
+  border-bottom: 1px solid #304b4b;
+}
+.lesson-preview-change:last-child {
+  border-bottom: 0;
+}
+.lesson-preview-change strong {
+  display: block;
+  font-size: 11px;
+  color: #dfe8d4;
+}
+.lesson-preview-change small {
+  font-size: 9px;
+  font-weight: 400;
+  color: #a1b4b5;
+  overflow-wrap: anywhere;
+}
+.lesson-preview-actions .button {
+  font-size: 11px;
+  padding: 8px 11px;
+}
+.roll-preview-label {
+  color: #e7cca7;
+  font-weight: 500;
 }
 @media (max-width: 1250px) {
   .practice-view:has(> .lesson-export-note) {

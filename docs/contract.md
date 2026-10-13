@@ -2,6 +2,16 @@
 
 All JSON uses snake_case. Musical times are milliseconds as f64 at original tempo. Transport speed scales wall time, never pitches. IDs are stable within a parsed file; library IDs are SHA-256 of exact source bytes.
 
+## Preview tools (0.4.0)
+
+`LessonToolRequest` is a snake_case tagged enum with unknown fields refused: `{ kind:"thin", strategy:"highest"|"bass_highest"|"limit", max_notes:u8, part_id:u32|null }` or `{ kind:"shift", note_ids:u32[], semitones:i16 }`. `max_notes` must be 1–8 for every thin request and controls the retained count only for `limit`. Shift accepts only −12 or +12; existing immediate pitch IPC remains available separately. `LessonPreview { revision:u64, changes:NoteChange[] }`; `NoteChange { note_id:u32, from_pitch:u8, to_pitch:u8|null }`, where null means removal. Changes are returned in ascending stable note-ID order.
+
+`preview_lesson_tool { id,expected_revision,request } -> LessonPreview` reads one saved practice-version revision without writing notes, history or settings. `apply_lesson_tool { id,expected_revision,request } -> OpenSong` recomputes the request against that revision, saves one validated removal/pitch Undo batch and returns the reloaded version paused. Client-supplied change arrays are never applied. Original IDs, stale revisions, invalid selections and MIDI-overflow moves are refused; applying no changes does not create a history entry. Cancel is client-only disposal of the preview. These commands use schema-3 state and the existing 100-action/200,000-note-change history bounds.
+
+Thin groups use exact `start_tick` and current surviving pitches. Null `part_id` combines all nonpercussion parts at each onset; a supplied ID scopes to that nonpercussion part. `highest` retains one highest event; `bass_highest` retains one lowest and one highest distinct pitch (one event for a unison); `limit` retains the highest `max_notes` note events, N=1–8, counting duplicate-pitch events separately. Equal-pitch ties retain lower stable IDs. Playback roles/Solo/split/loops do not change this editor scope. Whole-song range selectors operate on current nonpercussion notes and use `< low`, `> high` or their union; endpoints are in range. They replace selected IDs across the lesson rather than only the current page/filter.
+
+The UI renders every returned change in pages of 48 and constructs an unsaved After roll from it; Before retains saved note data. After is the default. Immediate edits, Undo and export are blocked until Apply/Cancel; option, selection/range, version, navigation and revision changes invalidate the preview. Applying clears selection after acknowledgement. Preview never feeds the input matcher or loads an audition into the transport. Release verification belongs in the test report; this contract does not assert hardware acceptance.
+
 ## Practice versions and export (0.3.0)
 
 `LibraryEntry` also includes `original_id:Option<String>` (missing means an original). Version IDs are `variant-<number>` and point directly to a root original. `OpenSong { entry,song,settings,lesson:Option<LessonState> }`; `LessonState { revision:u64,can_undo:bool,removed_count:usize,shifted_count:usize }`, with missing shifted count defaulting to zero.

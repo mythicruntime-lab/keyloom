@@ -91,6 +91,18 @@ export interface LessonState {
   shifted_count: number;
 }
 export type PitchShift = -12 | -1 | 1 | 12;
+export type LessonToolRequest =
+  | {
+      kind: "thin";
+      strategy: "highest" | "bass_highest" | "limit";
+      max_notes: number;
+      part_id: number | null;
+    }
+  | { kind: "shift"; note_ids: number[]; semitones: -12 | 12 };
+export interface LessonPreview {
+  revision: number;
+  changes: { note_id: number; from_pitch: number; to_pitch: number | null }[];
+}
 export interface OpenSong {
   entry: LibraryEntry;
   song: Song;

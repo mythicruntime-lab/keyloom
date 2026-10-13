@@ -1,5 +1,15 @@
 # Yamaha verification
 
+## Previewed chord thinning and range fitting — 0.4.0, pending
+
+The 0.4.0 software build/package checks and both final native workflows passed; details are in the test report. Physical acceptance of the new preview/apply targets is still pending. The owner is currently checking highest-note thinning on the demo's first C3+C4 chord (retaining C4), Undo restoring both notes, and pause clearing the lights. UI capture was unavailable, so only the owner's observation can establish this result; automated sends and simulations do not.
+
+- On a practice copy with a familiar chord, preview each thinning strategy and inspect the full change list and Before/After roll. Cancel once and confirm the saved targets remain unchanged. Apply a preview, finish editing and confirm the Yamaha guide lights and required physical keys follow only the retained notes. Check both all-pitched-parts and a selected-part scope; percussion must remain unchanged.
+- Check an exact-tick chord, a unison, and two notes that start slightly apart. Highest keeps one; bass/highest keeps the distinct extremes; a unison keeps one in those modes. Limit counts note events, including duplicates. Nearby onsets must not be combined just because they look like a chord on the roll.
+- With the actual keyboard endpoints configured, select below/above/outside-range notes across the whole lesson and preview an octave move. Review notes beyond the current page/visible roll. After applying and leaving the editor, confirm reachable edited pitches light and match their physical keys; any still-out-of-range notes remain warned and unlit. No pitch is automatically clamped or wrapped into range.
+- Use one **Undo edit** to reverse an applied preview, then restart and verify saved edits/history. Compare with the original. Preview/Cancel must not advance the song, sound simulated PC notes or send preview targets to the keyboard; entering editing and Apply must leave transport paused with old guide lights cleared.
+- Export a thinned/fitted copy to a new MIDI, reimport and practice it on the Yamaha. Confirm its retained pitches and source timing. Repeat pause/stop/version-change cleanup and Light Guide PC mute checks on the applied result. Successful native sends and synthetic input checks do not establish physical illumination or playing.
+
 ## Pitch editing and MIDI export — 0.3.0, pending
 
 No new physical-keyboard or release-test pass is claimed here for 0.3.0. Record automated release results in the test report separately from these hardware observations.

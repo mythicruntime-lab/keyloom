@@ -126,6 +126,41 @@ pub struct LessonState {
     pub shifted_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LessonToolRequest {
+    Thin {
+        strategy: ThinStrategy,
+        max_notes: u8,
+        part_id: Option<u32>,
+    },
+    Shift {
+        note_ids: Vec<u32>,
+        semitones: i16,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinStrategy {
+    Highest,
+    BassHighest,
+    Limit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LessonPreview {
+    pub revision: u64,
+    pub changes: Vec<NoteChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NoteChange {
+    pub note_id: u32,
+    pub from_pitch: u8,
+    pub to_pitch: Option<u8>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportResult {
     pub entry: LibraryEntry,

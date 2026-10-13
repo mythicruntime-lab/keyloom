@@ -2,7 +2,10 @@ use crate::{
     fixtures,
     library::Library,
     midi,
-    model::{ImportResult, LessonState, LibraryEntry, Song, SongSettings},
+    model::{
+        ImportResult, LessonPreview, LessonState, LessonToolRequest, LibraryEntry, Song,
+        SongSettings,
+    },
     runtime::{AppStatus, Command, Preferences, Runtime},
 };
 use serde::Serialize;
@@ -310,6 +313,43 @@ async fn transpose_notes(
     })
     .await
 }
+#[tauri::command(rename_all = "snake_case")]
+async fn preview_lesson_tool(
+    id: String,
+    expected_revision: u64,
+    request: LessonToolRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<LessonPreview, String> {
+    let lib = state.library.clone();
+    blocking(move || {
+        lib.lock()
+            .map_err(lock_error)?
+            .preview_tool(&id, &request, expected_revision)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn apply_lesson_tool(
+    id: String,
+    expected_revision: u64,
+    request: LessonToolRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<OpenSong, String> {
+    let lib = state.library.clone();
+    let runtime = state.runtime.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        runtime.send(Command::Pause)?;
+        persist_session(&lib, &runtime)?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        library.apply_tool(&id, &request, expected_revision)?;
+        load_session(&mut library, &runtime, &id).map_err(saved_version_error)
+    })
+    .await
+}
+
 fn saved_version_error(reason: String) -> String {
     format!("The practice version was saved, but could not reopen for playback: {reason} Open it again from the Library.")
 }
@@ -701,7 +741,7 @@ pub fn run() {
         app.manage(AppState{library:Arc::new(Mutex::new(library)),runtime,preferences:Arc::new(Mutex::new(preferences)),root,pending:Mutex::new(pending),importing:Arc::new(AtomicBool::new(false)),operations:Arc::new(Mutex::new(())),smoke,started,launch_to_ui_us:AtomicU64::new(0)});
         let handle=app.handle().clone();std::thread::Builder::new().name("keyloom-save".into()).spawn(move||loop{std::thread::sleep(Duration::from_secs(5));if let Some(state)=handle.try_state::<AppState>(){if persist(&state).is_err(){/* Kept out of timing path; exit retries persistence. */}}else{break;}})?;
         Ok(())
-    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,transpose_notes,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
+    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,transpose_notes,preview_lesson_tool,apply_lesson_tool,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
     let application = builder
         .build(tauri::generate_context!())
         .expect("Keyloom could not initialize its local application data or WebView2 window");

@@ -1,5 +1,7 @@
 pub use crate::model::{ImportResult, LessonState, LibraryEntry};
-use crate::model::{Song, SongSettings};
+use crate::model::{
+    LessonPreview, LessonToolRequest, NoteChange, Song, SongSettings, ThinStrategy,
+};
 use crate::parser::{self, MAX_FILE_BYTES};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -387,6 +389,50 @@ impl Library {
         self.save_variant_edit(id, expected_revision, &edit)
     }
 
+    /// Preview one saved revision without mutating its notes, history or settings.
+    pub fn preview_tool(
+        &self,
+        id: &str,
+        request: &LessonToolRequest,
+        expected_revision: u64,
+    ) -> Result<LessonPreview, String> {
+        let edit = self.variant_edit(id)?;
+        check_revision(edit.revision, expected_revision)?;
+        // Build from the same edit snapshot whose revision was checked. Loading
+        // the variant again could observe a second connection's newer revision.
+        let mut song = self.load(&edit.original_id)?;
+        apply_variant_view(&mut song, &edit);
+        Ok(LessonPreview {
+            revision: edit.revision,
+            changes: tool_changes(&song, request)?,
+        })
+    }
+
+    /// Recompute the preview server-side; callers never supply trusted changes.
+    /// Existing mutations validate again and atomically save one Undo batch.
+    pub fn apply_tool(
+        &mut self,
+        id: &str,
+        request: &LessonToolRequest,
+        expected_revision: u64,
+    ) -> Result<(), String> {
+        let preview = self.preview_tool(id, request, expected_revision)?;
+        if preview.changes.is_empty() {
+            return Err("This tool would not change any notes; nothing was saved.".into());
+        }
+        let note_ids: Vec<_> = preview
+            .changes
+            .iter()
+            .map(|change| change.note_id)
+            .collect();
+        match request {
+            LessonToolRequest::Thin { .. } => self.remove_notes(id, expected_revision, &note_ids),
+            LessonToolRequest::Shift { semitones, .. } => {
+                self.transpose_notes(id, expected_revision, &note_ids, *semitones)
+            }
+        }
+    }
+
     /// Move only selected visible stable IDs. Validate every new pitch before
     /// changing any persisted state, preserving timing, velocity and part IDs.
     pub fn transpose_notes(
@@ -656,19 +702,7 @@ impl Library {
         if variant_number(id)?.is_some() {
             let edit = self.variant_edit(id)?;
             let mut song = self.load(&edit.original_id)?;
-            song.notes.retain(|note| !edit.removed.contains(&note.id));
-            for note in &mut song.notes {
-                if let Some(pitch) = edit.pitches.get(&note.id) {
-                    note.pitch = *pitch;
-                }
-            }
-            let mut counts = std::collections::HashMap::new();
-            for note in &song.notes {
-                *counts.entry(note.part_id).or_insert(0_usize) += 1;
-            }
-            for part in &mut song.parts {
-                part.note_count = counts.get(&part.id).copied().unwrap_or(0);
-            }
+            apply_variant_view(&mut song, &edit);
             return Ok(song);
         }
         if !self.managed_path(id)?.is_file() {
@@ -878,6 +912,128 @@ impl Library {
         }
         Ok(())
     }
+}
+
+fn apply_variant_view(song: &mut Song, edit: &VariantEdit) {
+    song.notes.retain(|note| !edit.removed.contains(&note.id));
+    let mut counts = std::collections::HashMap::new();
+    for note in &mut song.notes {
+        if let Some(pitch) = edit.pitches.get(&note.id) {
+            note.pitch = *pitch;
+        }
+        *counts.entry(note.part_id).or_insert(0_usize) += 1;
+    }
+    for part in &mut song.parts {
+        part.note_count = counts.get(&part.id).copied().unwrap_or(0);
+    }
+}
+
+fn tool_changes(song: &Song, request: &LessonToolRequest) -> Result<Vec<NoteChange>, String> {
+    if song.notes.len() > parser::MAX_NOTES {
+        return Err("Practice version exceeds the song's note limit.".into());
+    }
+    let mut changes = Vec::new();
+    match request {
+        LessonToolRequest::Thin {
+            strategy,
+            max_notes,
+            part_id,
+        } => {
+            if !(1..=8).contains(max_notes) {
+                return Err("Keep between 1 and 8 notes per chord.".into());
+            }
+            if let Some(id) = part_id {
+                let part = song
+                    .parts
+                    .iter()
+                    .find(|part| part.id == *id)
+                    .ok_or("The selected part does not exist in this practice version.")?;
+                if part.percussion {
+                    return Err("Chord thinning applies to pitched parts, not percussion.".into());
+                }
+            }
+            let included: HashSet<_> = song
+                .parts
+                .iter()
+                .filter(|part| !part.percussion && part_id.is_none_or(|id| part.id == id))
+                .map(|part| part.id)
+                .collect();
+            let mut notes: Vec<_> = song
+                .notes
+                .iter()
+                .filter(|note| included.contains(&note.part_id))
+                .collect();
+            // Exact onset ticks form a chord. A note starting one tick later is
+            // a separate group even if its audible duration overlaps this one.
+            notes.sort_unstable_by_key(|note| {
+                (note.start_tick, std::cmp::Reverse(note.pitch), note.id)
+            });
+            let mut start = 0;
+            while start < notes.len() {
+                let mut end = start + 1;
+                while end < notes.len() && notes[end].start_tick == notes[start].start_tick {
+                    end += 1;
+                }
+                let group = &notes[start..end];
+                let bass = if *strategy == ThinStrategy::BassHighest {
+                    let lowest = group.last().expect("nonempty chord").pitch;
+                    group
+                        .iter()
+                        .position(|note| note.pitch == lowest)
+                        .expect("lowest chord pitch")
+                } else {
+                    0
+                };
+                for (index, note) in group.iter().enumerate() {
+                    let keep = match strategy {
+                        ThinStrategy::Highest => index == 0,
+                        ThinStrategy::BassHighest => index == 0 || index == bass,
+                        ThinStrategy::Limit => index < usize::from(*max_notes),
+                    };
+                    if !keep {
+                        changes.push(NoteChange {
+                            note_id: note.id,
+                            from_pitch: note.pitch,
+                            to_pitch: None,
+                        });
+                    }
+                }
+                start = end;
+            }
+        }
+        LessonToolRequest::Shift {
+            note_ids,
+            semitones,
+        } => {
+            if ![-12, 12].contains(semitones) {
+                return Err("The octave tool moves notes by exactly -12 or +12 semitones.".into());
+            }
+            if note_ids.len() > parser::MAX_NOTES {
+                return Err("Select notes within the song's note limit.".into());
+            }
+            let selected: BTreeSet<_> = note_ids.iter().copied().collect();
+            if selected.len() != note_ids.len() {
+                return Err("An octave move cannot contain repeated note IDs.".into());
+            }
+            let visible: BTreeMap<_, _> = song.notes.iter().map(|note| (note.id, note)).collect();
+            for id in selected {
+                let note = visible.get(&id).ok_or_else(|| {
+                    format!("Note {id} is unknown or removed; refresh this practice version.")
+                })?;
+                let pitch = i16::from(note.pitch) + semitones;
+                if !(0..=127).contains(&pitch) {
+                    return Err(format!("Moving note {id} would leave MIDI pitch range 0–127; no notes were changed."));
+                }
+                changes.push(NoteChange {
+                    note_id: id,
+                    from_pitch: note.pitch,
+                    to_pitch: Some(pitch as u8),
+                });
+            }
+        }
+    }
+    changes.sort_unstable_by_key(|change| change.note_id);
+    Ok(changes)
 }
 
 fn validate_settings(settings: &SongSettings, song: &Song) -> Result<(), String> {

@@ -117,12 +117,25 @@ async function selectLesson(id: string) {
   await waitFor(`lesson ${id} opened through version selector`, () =>
     document.querySelector(`.practice-view[data-song-id="${id}"]`),
   );
+  await waitPracticeReady();
+}
+async function waitPracticeReady() {
+  await waitFor(
+    "native lesson open/save finishes and enables its controls",
+    () => {
+      const version = document.querySelector<HTMLSelectElement>(
+        'select[aria-label="Lesson version"]',
+      );
+      return version && !version.disabled && !version.closest("main[inert]");
+    },
+  );
 }
 async function readOpenLesson(id: string) {
   assert(
     document.querySelector(`.practice-view[data-song-id="${id}"]`),
     "Native lesson verification must match the lesson visible in the actual UI",
   );
+  await waitPracticeReady();
   return invoke<OpenSong>("open_song", { id });
 }
 async function selectNotes(ids: number[]) {
@@ -147,6 +160,7 @@ async function waitRemovedCount(count: number) {
       document.querySelector<HTMLElement>(".lesson-edit-summary")?.dataset
         .removedCount === String(count),
   );
+  await waitPracticeReady();
 }
 async function waitShiftedCount(count: number) {
   await waitFor(
@@ -154,6 +168,33 @@ async function waitShiftedCount(count: number) {
     () =>
       document.querySelector<HTMLElement>(".lesson-edit-summary")?.dataset
         .shiftedCount === String(count),
+  );
+  await waitPracticeReady();
+}
+async function openLessonTools() {
+  const summary = [...document.querySelectorAll<HTMLElement>("summary")].find(
+    (item) => item.textContent?.trim() === "Simplify and fit",
+  );
+  assert(summary, "Missing Simplify and fit tools");
+  if (!summary.closest("details")?.open) summary.click();
+  await waitFor(
+    "lesson tools expanded",
+    () => summary.closest("details")?.open,
+  );
+}
+async function previewCount(kind: "thin" | "shift") {
+  const panel = await waitFor("native lesson preview displayed", () =>
+    document.querySelector<HTMLElement>(
+      `.lesson-tool-preview[data-preview-kind="${kind}"]`,
+    ),
+  );
+  return Number(panel.dataset.changeCount);
+}
+async function cancelPreview() {
+  button("Cancel preview").click();
+  await waitFor(
+    "preview cancelled",
+    () => !document.querySelector(".lesson-tool-preview"),
   );
 }
 function musicalNotes(song: OpenSong["song"]) {
@@ -261,6 +302,7 @@ async function openFromImport(id: string) {
   await waitFor("direct Open reaches actual practice view", () =>
     document.querySelector(`.practice-view[data-song-id="${id}"]`),
   );
+  await waitPracticeReady();
 }
 async function animationFrames(count = 120) {
   return new Promise<{
@@ -1159,7 +1201,220 @@ export async function runNativeSmoke() {
         },
       );
       await check(
-        "pitch controls, mixed Undo and export-to-import-to-play through native UI",
+        "preview thinning, cancel, apply and single Undo through native controls",
+        async () => {
+          const variant = (await library()).find(
+            (entry) => entry.title === PERSISTED_VARIANT,
+          )!;
+          await selectLesson(variant.id);
+          const before = await readOpenLesson(variant.id);
+          button("Edit notes").click();
+          await waitRemovedCount(2);
+          await openLessonTools();
+          setSelect(
+            get('select[aria-label="Chord thinning strategy"]'),
+            "highest",
+          );
+          await sleep(80);
+          button("Preview chord thinning").click();
+          const count = await previewCount("thin");
+          assert(count > 0, "Fixture needs an exact-onset chord to thin");
+          const previewRows = document.querySelectorAll(
+            ".lesson-preview-change",
+          );
+          assert(
+            previewRows.length === Math.min(48, count),
+            "Exact-change preview is not bounded to 48 rows",
+          );
+          assert(
+            [...previewRows].every(
+              (row) => row.getAttribute("data-to-pitch") === "removed",
+            ),
+            "Thin preview must identify removals",
+          );
+          button("After").click();
+          await waitFor("After comparison on roll", () =>
+            document.querySelector(
+              '.lesson-tool-preview[data-display="after"]',
+            ),
+          );
+          const previewed = await readOpenLesson(variant.id);
+          assert(
+            JSON.stringify(previewed.song) === JSON.stringify(before.song) &&
+              previewed.lesson?.revision === before.lesson?.revision,
+            "Preview altered native notes or revision",
+          );
+          assert(
+            !(await snapshot()).transport.playing,
+            "Preview started native playback",
+          );
+          button("Before").click();
+          await waitFor("Before comparison on roll", () =>
+            document.querySelector(
+              '.lesson-tool-preview[data-display="before"]',
+            ),
+          );
+          await cancelPreview();
+          const cancelled = await readOpenLesson(variant.id);
+          assert(
+            JSON.stringify(cancelled.lesson) === JSON.stringify(before.lesson),
+            "Cancel changed revision or history",
+          );
+          button("Preview chord thinning").click();
+          assert(
+            (await previewCount("thin")) === count,
+            "Identical preview was not deterministic",
+          );
+          button("Apply preview").click();
+          await waitRemovedCount(2 + count);
+          const thinned = await readOpenLesson(variant.id);
+          const pitchedParts = new Set(
+            before.song.parts
+              .filter((part) => !part.percussion)
+              .map((part) => part.id),
+          );
+          const highest = new Map<number, (typeof before.song.notes)[number]>();
+          for (const note of before.song.notes) {
+            if (!pitchedParts.has(note.part_id)) continue;
+            const prior = highest.get(note.start_tick);
+            if (
+              !prior ||
+              note.pitch > prior.pitch ||
+              (note.pitch === prior.pitch && note.id < prior.id)
+            )
+              highest.set(note.start_tick, note);
+          }
+          const expectedIds = new Set(
+            [...highest.values()].map((note) => note.id),
+          );
+          const expected = before.song.notes.filter(
+            (note) =>
+              !pitchedParts.has(note.part_id) || expectedIds.has(note.id),
+          );
+          assert(
+            JSON.stringify(thinned.song.notes) === JSON.stringify(expected),
+            "Highest-note tool changed timing or kept the wrong targets",
+          );
+          assert(
+            thinned.lesson?.revision === before.lesson!.revision + 1,
+            "Applying one preview did not create exactly one revision",
+          );
+          button("Undo edit").click();
+          await waitRemovedCount(2);
+          assert(
+            JSON.stringify((await readOpenLesson(variant.id)).song) ===
+              JSON.stringify(before.song),
+            "One Undo did not restore all thinned notes",
+          );
+          for (const strategy of ["bass_highest", "limit"]) {
+            setSelect(
+              get('select[aria-label="Chord thinning strategy"]'),
+              strategy,
+            );
+            await sleep(80);
+            button("Preview chord thinning").click();
+            const alternativeCount = await previewCount("thin");
+            assert(
+              alternativeCount <= count,
+              "Two-note thinning removed more than highest-only",
+            );
+            await cancelPreview();
+          }
+          button("Done editing").click();
+          await selectLesson(first.id);
+          return {
+            changed_notes: count,
+            cancelled_without_mutation: true,
+            one_step_undo: true,
+            before_after_comparison: true,
+            physical_keyboard_verified: false,
+          };
+        },
+      );
+      await check(
+        "whole-song range selection and previewed octave shift are atomic and undoable",
+        async () => {
+          const variant = (await library()).find(
+            (entry) => entry.title === PERSISTED_VARIANT,
+          )!;
+          const preferences = await invoke<Preferences>("preferences");
+          await selectLesson(variant.id);
+          const before = await readOpenLesson(variant.id);
+          const pitchedParts = new Set(
+            before.song.parts
+              .filter((part) => !part.percussion)
+              .map((part) => part.id),
+          );
+          const low = Math.min(
+            115,
+            Math.max(...before.song.notes.map((note) => note.pitch)) + 1,
+          );
+          const outside = before.song.notes.filter(
+            (note) => pitchedParts.has(note.part_id) && note.pitch < low,
+          );
+          assert(
+            outside.length > 0,
+            "Fixture needs notes below temporary keyboard range",
+          );
+          await navigate("Keyboard & sound", ".devices-view");
+          await setKeyboardRange(low, 127);
+          await navigate("Practice", ".practice-view");
+          button("Edit notes").click();
+          await waitRemovedCount(2);
+          await openLessonTools();
+          button("Select below range").click();
+          await waitFor(
+            "all below-range notes selected across list pages",
+            () =>
+              get<HTMLElement>(".lesson-edit-summary").dataset.selectedCount ===
+              String(outside.length),
+          );
+          button("Preview octave up").click();
+          assert(
+            (await previewCount("shift")) === outside.length,
+            "Range preview omitted selected notes on later pages",
+          );
+          assert(
+            JSON.stringify((await readOpenLesson(variant.id)).song) ===
+              JSON.stringify(before.song),
+            "Octave preview mutated native notes",
+          );
+          button("Apply preview").click();
+          await waitShiftedCount(outside.length);
+          const shifted = await readOpenLesson(variant.id);
+          const ids = new Set(outside.map((note) => note.id));
+          assert(
+            JSON.stringify(shifted.song.notes) ===
+              JSON.stringify(
+                before.song.notes.map((note) =>
+                  ids.has(note.id) ? { ...note, pitch: note.pitch + 12 } : note,
+                ),
+              ),
+            "Bulk octave move changed timing or unselected notes",
+          );
+          button("Undo edit").click();
+          await waitShiftedCount(0);
+          assert(
+            JSON.stringify((await readOpenLesson(variant.id)).song) ===
+              JSON.stringify(before.song),
+            "One Undo did not restore entire range move",
+          );
+          button("Done editing").click();
+          await navigate("Keyboard & sound", ".devices-view");
+          await setKeyboardRange(preferences.low, preferences.high);
+          await navigate("Practice", ".practice-view");
+          await selectLesson(first.id);
+          return {
+            selected_across_whole_song: outside.length,
+            preview_shift: 12,
+            exact_restore: true,
+            range_restored: true,
+            physical_keyboard_verified: false,
+          };
+        },
+      );
+      await check(
+        "pitch controls, mixed Undo and simplified export-to-import-to-play through native UI",
         async () => {
           const entries = await library();
           const first = entries.find(
@@ -1241,7 +1496,22 @@ export async function runNativeSmoke() {
           button("Undo edit").click();
           await waitRemovedCount(2);
           await waitShiftedCount(1);
-          const edited = await verifyPitch(candidate.pitch + 12);
+          const pitchEdited = await verifyPitch(candidate.pitch + 12);
+          await openLessonTools();
+          setSelect(
+            get('select[aria-label="Chord thinning strategy"]'),
+            "highest",
+          );
+          await sleep(80);
+          button("Preview chord thinning").click();
+          const exportThinnedCount = await previewCount("thin");
+          assert(
+            exportThinnedCount > 0,
+            "Export fixture needs at least one chord removal",
+          );
+          button("Apply preview").click();
+          await waitRemovedCount(2 + exportThinnedCount);
+          const edited = await readOpenLesson(variant.id);
           button("Done editing").click();
           button("Export MIDI", get(".lesson-version-bar")).click();
           await waitFor("export success contains actual new file path", () =>
@@ -1299,6 +1569,27 @@ export async function runNativeSmoke() {
           await navigate("Library", ".library-view");
           button(
             "Practice",
+            get(`.song-row[data-song-id="${variant.id}"]`),
+          ).click();
+          await waitFor("practice copy reopened after simplified export", () =>
+            document.querySelector(
+              `.practice-view[data-song-id="${variant.id}"]`,
+            ),
+          );
+          button("Edit notes").click();
+          await waitRemovedCount(2 + exportThinnedCount);
+          button("Undo edit").click();
+          await waitRemovedCount(2);
+          const exportUndone = await readOpenLesson(variant.id);
+          assert(
+            JSON.stringify(exportUndone.song) ===
+              JSON.stringify(pitchEdited.song),
+            "Undo after export did not restore saved pitch edit",
+          );
+          button("Done editing").click();
+          await navigate("Library", ".library-view");
+          button(
+            "Practice",
             get(`.song-row[data-song-id="${first.id}"]`),
           ).click();
           await waitFor("original restored after exported playback", () =>
@@ -1321,6 +1612,7 @@ export async function runNativeSmoke() {
             shifted_note_id: candidate.id,
             original_pitch: candidate.pitch,
             edited_pitch: candidate.pitch + 12,
+            chord_notes_removed_for_export: exportThinnedCount,
             exported_note_count: reimported.song.notes.length,
             exact_musical_roundtrip: true,
             native_reimport_playback: true,

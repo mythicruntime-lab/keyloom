@@ -13,6 +13,8 @@ import {
   ImportOutcome,
   ImportResult,
   LibraryEntry,
+  LessonPreview,
+  LessonToolRequest,
   MidiEvent,
   OpenSong,
   PartSetting,
@@ -121,6 +123,18 @@ export default function App() {
   } | null>(null);
   const [openingSong, setOpeningSong] = useState(false);
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
+  const [toolPreview, setToolPreview] = useState<{
+    id: string;
+    request: LessonToolRequest;
+    result: LessonPreview;
+    low: number;
+    high: number;
+  } | null>(null);
+  const [previewDisplay, setPreviewDisplay] = useState<"before" | "after">(
+    "after",
+  );
+  const [previewing, setPreviewing] = useState(false);
+  const previewGeneration = useRef(0);
   const [variantDraft, setVariantDraft] = useState<{
     id: string;
     title: string;
@@ -160,6 +174,22 @@ export default function App() {
     (reason: unknown) => setError(messageOf(reason)),
     [],
   );
+  const cancelToolPreview = useCallback(() => {
+    ++previewGeneration.current;
+    setToolPreview(null);
+  }, []);
+  useEffect(() => {
+    cancelToolPreview();
+  }, [
+    current?.entry.id,
+    current?.lesson?.revision,
+    preferences.low,
+    preferences.high,
+    selectedNotes,
+    editing,
+    view,
+    cancelToolPreview,
+  ]);
   useEffect(() => {
     if (view === "devices") setEvents(eventHistory.current);
   }, [view]);
@@ -710,7 +740,8 @@ export default function App() {
       !active.lesson ||
       lessonBusyRef.current ||
       openingSongRef.current ||
-      !latest.current.editing
+      !latest.current.editing ||
+      toolPreview
     )
       return;
     if (action !== "undo_notes" && !selectedNotes.size) return;
@@ -755,6 +786,122 @@ export default function App() {
       setCurrent(null);
       setEditing(false);
       setSelectedNotes(new Set());
+      setView("library");
+      setQuery("");
+      setFavorites(false);
+      await reloadRef.current();
+      report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+    }
+  };
+  const previewLessonTool = async (request: LessonToolRequest) => {
+    const active = latest.current.current;
+    if (
+      !active?.entry.original_id ||
+      !active.lesson ||
+      !latest.current.editing ||
+      lessonBusyRef.current ||
+      openingSongRef.current
+    )
+      return;
+    const generation = openGeneration.current;
+    const previewToken = ++previewGeneration.current;
+    const low = latest.current.preferences.low,
+      high = latest.current.preferences.high;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    setPreviewing(true);
+    setToolPreview(null);
+    setError("");
+    try {
+      const result = await invoke<LessonPreview>("preview_lesson_tool", {
+        id: active.entry.id,
+        expected_revision: active.lesson.revision,
+        request,
+      });
+      if (
+        generation === openGeneration.current &&
+        previewToken === previewGeneration.current &&
+        latest.current.current?.entry.id === active.entry.id &&
+        latest.current.current.lesson?.revision === result.revision &&
+        latest.current.editing &&
+        latest.current.preferences.low === low &&
+        latest.current.preferences.high === high
+      ) {
+        setToolPreview({ id: active.entry.id, request, result, low, high });
+        setPreviewDisplay("after");
+      }
+    } catch (reason) {
+      if (
+        generation === openGeneration.current &&
+        previewToken === previewGeneration.current
+      )
+        report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+      setPreviewing(false);
+    }
+  };
+  const applyLessonTool = async () => {
+    const preview = toolPreview,
+      active = latest.current.current;
+    if (
+      !preview ||
+      !preview.result.changes.length ||
+      !active?.lesson ||
+      active.entry.id !== preview.id ||
+      active.lesson.revision !== preview.result.revision ||
+      !latest.current.editing ||
+      lessonBusyRef.current ||
+      openingSongRef.current ||
+      latest.current.preferences.low !== preview.low ||
+      latest.current.preferences.high !== preview.high
+    )
+      return;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    const generation = openGeneration.current;
+    const previewToken = previewGeneration.current;
+    try {
+      await flushSettings();
+      if (
+        generation !== openGeneration.current ||
+        previewToken !== previewGeneration.current ||
+        latest.current.current?.entry.id !== active.entry.id ||
+        latest.current.current.lesson?.revision !== preview.result.revision ||
+        latest.current.preferences.low !== preview.low ||
+        latest.current.preferences.high !== preview.high ||
+        !latest.current.editing
+      )
+        return;
+      const result = await invoke<OpenSong>("apply_lesson_tool", {
+        id: active.entry.id,
+        expected_revision: preview.result.revision,
+        request: preview.request,
+      });
+      if (
+        generation === openGeneration.current &&
+        latest.current.current?.entry.id === active.entry.id
+      ) {
+        latest.current.current = result;
+        setCurrent(result);
+        setSelectedNotes(new Set());
+        setSeekValue(null);
+        cancelToolPreview();
+        refreshStatusSoon.current();
+      }
+      await reloadRef.current();
+    } catch (reason) {
+      ++openGeneration.current;
+      latest.current.current = null;
+      latest.current.editing = false;
+      setCurrent(null);
+      setEditing(false);
+      setSelectedNotes(new Set());
+      cancelToolPreview();
       setView("library");
       setQuery("");
       setFavorites(false);
@@ -819,7 +966,7 @@ export default function App() {
     }
   };
   const toggleSelectedNote = (id: number) => {
-    if (lessonBusyRef.current) return;
+    if (lessonBusyRef.current || toolPreview) return;
     setSelectedNotes((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
@@ -828,7 +975,13 @@ export default function App() {
     });
   };
   const exportSong = async (entry: LibraryEntry) => {
-    if (!native || lessonBusyRef.current || openingSongRef.current) return;
+    if (
+      !native ||
+      lessonBusyRef.current ||
+      openingSongRef.current ||
+      toolPreview
+    )
+      return;
     const generation = openGeneration.current;
     const activeId = latest.current.current?.entry.id;
     lessonBusyRef.current = true;
@@ -1030,6 +1183,33 @@ export default function App() {
     setLoopDraft(null);
   };
   const settings = current?.settings;
+  const activeToolPreview =
+    editing &&
+    toolPreview &&
+    toolPreview.id === current?.entry.id &&
+    toolPreview.result.revision === current.lesson?.revision &&
+    toolPreview.low === preferences.low &&
+    toolPreview.high === preferences.high
+      ? toolPreview
+      : null;
+  const afterPreviewSong = useMemo(() => {
+    const source = current?.song;
+    if (!source || !activeToolPreview) return source;
+    const changes = new Map(
+      activeToolPreview.result.changes.map((change) => [
+        change.note_id,
+        change,
+      ]),
+    );
+    const notes: typeof source.notes = [];
+    for (const note of source.notes) {
+      const change = changes.get(note.id);
+      if (!change) notes.push(note);
+      else if (change.to_pitch !== null)
+        notes.push({ ...note, pitch: change.to_pitch });
+    }
+    return { ...source, notes };
+  }, [current?.song, activeToolPreview]);
   const sortedEntries = useMemo(
     () =>
       [...entries].sort((a, b) =>
@@ -1574,6 +1754,7 @@ export default function App() {
             <section
               className={`practice-view ${editing ? "is-editing" : ""}`}
               data-song-id={current.entry.id}
+              data-preview-display={activeToolPreview ? previewDisplay : "none"}
             >
               <header className="practice-header">
                 <div>
@@ -1653,13 +1834,15 @@ export default function App() {
                 <span className="lesson-version-detail">
                   {openingSong
                     ? "Opening version…"
-                    : exporting
-                      ? "Exporting MIDI…"
-                      : lessonBusy
-                        ? "Saving changes…"
-                        : current.entry.original_id
-                          ? `${current.lesson?.removed_count ?? 0} removed · ${current.lesson?.shifted_count ?? 0} shifted · original preserved`
-                          : "Original MIDI · unchanged"}
+                    : previewing
+                      ? "Preparing preview…"
+                      : exporting
+                        ? "Exporting MIDI…"
+                        : lessonBusy
+                          ? "Saving changes…"
+                          : current.entry.original_id
+                            ? `${current.lesson?.removed_count ?? 0} removed · ${current.lesson?.shifted_count ?? 0} shifted · original preserved`
+                            : "Original MIDI · unchanged"}
                 </span>
                 <div className="button-row">
                   <button
@@ -1679,7 +1862,9 @@ export default function App() {
                   {current.entry.original_id && (
                     <button
                       className="small-button"
-                      disabled={lessonBusy || openingSong}
+                      disabled={
+                        lessonBusy || openingSong || !!activeToolPreview
+                      }
                       onClick={() => void exportSong(current.entry)}
                       aria-describedby="practice-export-help"
                     >
@@ -1803,16 +1988,28 @@ export default function App() {
                       </span>
                     </div>
                     <span>
+                      {activeToolPreview && (
+                        <strong className="roll-preview-label">
+                          Preview ·{" "}
+                          {previewDisplay === "after" ? "After" : "Before"}{" "}
+                          ·{" "}
+                        </strong>
+                      )}
                       {noteName(preferences.low)}–{noteName(preferences.high)}
                     </span>
                   </div>
                   <PianoRoll
-                    song={current.song}
+                    song={
+                      activeToolPreview && previewDisplay === "after"
+                        ? afterPreviewSong!
+                        : current.song
+                    }
                     settings={settings}
                     status={status}
                     preferences={preferences}
                     onNote={inputNote}
                     editing={editing}
+                    previewing={!!activeToolPreview}
                     selectedNotes={selectedNotes}
                     onToggleNote={toggleSelectedNote}
                   />
@@ -1821,16 +2018,18 @@ export default function App() {
                     aria-live="polite"
                   >
                     <span>
-                      {editing
-                        ? "Editing paused · click notes to select; seek to inspect another segment"
-                        : status.transport.count_in_remaining > 0
-                          ? `Count in · ${status.transport.count_in_remaining}`
-                          : status.transport.waiting
-                            ? `Your turn · ${currentTargets.map((pitch) => noteName(pitch, preferences.note_numbers)).join(" + ") || "release and press the next notes"}`
-                            : status.transport.feedback ||
-                              (status.transport.playing
-                                ? "Follow the notes to the light line"
-                                : "Ready at your own pace")}
+                      {activeToolPreview
+                        ? "Preview only · compare Before and After, then Apply or Cancel"
+                        : editing
+                          ? "Editing paused · click notes to select; seek to inspect another segment"
+                          : status.transport.count_in_remaining > 0
+                            ? `Count in · ${status.transport.count_in_remaining}`
+                            : status.transport.waiting
+                              ? `Your turn · ${currentTargets.map((pitch) => noteName(pitch, preferences.note_numbers)).join(" + ") || "release and press the next notes"}`
+                              : status.transport.feedback ||
+                                (status.transport.playing
+                                  ? "Follow the notes to the light line"
+                                  : "Ready at your own pace")}
                     </span>
                     <span>
                       {settings.mode !== "listen" && (
@@ -1852,12 +2051,22 @@ export default function App() {
                     selected={selectedNotes}
                     position={status.transport.position_ms}
                     saving={lessonBusy}
+                    preview={activeToolPreview}
+                    previewDisplay={previewDisplay}
+                    onPreview={(request) => void previewLessonTool(request)}
+                    onCancelPreview={cancelToolPreview}
+                    onApplyPreview={() => void applyLessonTool()}
+                    onPreviewDisplay={setPreviewDisplay}
                     onToggle={toggleSelectedNote}
                     onSelect={(ids) =>
                       setSelectedNotes(
                         (previous) => new Set([...previous, ...ids]),
                       )
                     }
+                    onReplaceSelection={(ids) => {
+                      cancelToolPreview();
+                      setSelectedNotes(new Set(ids));
+                    }}
                     onClear={() => setSelectedNotes(new Set())}
                     onSeek={(ms) => void control("seek", ms)}
                     onRemove={() => void updateLesson("remove_notes")}
@@ -2851,7 +3060,7 @@ export default function App() {
                 <button
                   type="button"
                   className="small-button"
-                  disabled={lessonBusy || openingSong}
+                  disabled={lessonBusy || openingSong || !!activeToolPreview}
                   aria-describedby="metadata-export-help"
                   onClick={() => void exportSong(metadata)}
                 >

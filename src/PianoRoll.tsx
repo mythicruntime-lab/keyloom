@@ -17,6 +17,7 @@ interface Props {
   preferences: Preferences;
   onNote: (pitch: number, on: boolean) => void;
   editing?: boolean;
+  previewing?: boolean;
   selectedNotes?: Set<number>;
   onToggleNote?: (id: number) => void;
 }
@@ -383,17 +384,20 @@ export default function PianoRoll(props: Props) {
   return (
     <canvas
       ref={canvas}
-      className={`piano-roll ${props.editing ? "note-editing" : props.preferences.simulated ? "can-play" : ""}`}
+      className={`piano-roll ${props.previewing ? "is-preview" : props.editing ? "note-editing" : props.preferences.simulated ? "can-play" : ""}`}
       aria-label={
-        props.editing
-          ? "Paused note editor. Click a visible note to toggle selection. Use the accessible note list to select notes outside the keyboard range."
-          : "Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. On-screen keys are for simulated monitoring only and cannot satisfy practice targets. Enable test input to use them."
+        props.previewing
+          ? "Paused lesson preview. Compare Before and After, then Apply or Cancel. This display does not play or send notes."
+          : props.editing
+            ? "Paused note editor. Click a visible note to toggle selection. Use the accessible note list to select notes outside the keyboard range."
+            : "Falling note piano roll. Amber notes are left hand, teal right hand, gray accompaniment. The bright pink hit line is above the keyboard; play when the leading edge of a note reaches it. On-screen keys are for simulated monitoring only and cannot satisfy practice targets. Enable test input to use them."
       }
       onPointerDown={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - rect.left,
           y = event.clientY - rect.top;
         if (props.editing) {
+          if (props.previewing) return;
           const note = [...noteHits.current]
             .reverse()
             .find(

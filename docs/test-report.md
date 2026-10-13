@@ -1,5 +1,26 @@
 # Keyloom verification
 
+## 0.4.0 previewable simplification — 12 October 2026
+
+The 0.3.0 baseline was clean at `b8e625a`; 134 Rust executions and TypeScript passed before changes. The 0.4.0 suite passes **141 Rust executions** (56 unit + 70 library/transport integration + 15 export/model integration; 97 distinct cases; one optional benchmark ignored), strict Clippy, Rust/Prettier formatting, TypeScript and the Windows production build. Seven new integration cases cover exact-onset grouping, deterministic equal-pitch ties, percussion and part scoping, sparse IDs/current pitch overrides, read-only previews, no-op and invalid batch atomicity, stale previews across two connections, legacy mixed Undo/restart, export→reimport→actual transport, and one-step Undo of a 10,000-note unison chord. No schema or dependency versions changed.
+
+The final release executable passed two actual Tauri/WebView/native runs:
+
+| Native run | Exercise | Restart | New tools exercised |
+| --- | --- | --- | --- |
+| Generated demo | 13 checks, 17,213.2 ms | 3 checks, 892.7 ms | Four thinned notes, ten-note bulk octave preview, exact Undo; six-note exported result |
+| Owner-selected easy MIDI | 13 checks, 17,732.9 ms | 3 checks, 1,040.9 ms | 1,366 thinned notes, 2,169-note bulk octave preview across pages, exact Undo; 803-note exported result |
+
+Both runs import through the running-instance queue, open from the Ready result, drive real controls, preview/compare/Cancel without changing saved notes or revision, apply one atomic edit, and Undo to exact prior notes. Alternative bass/highest and limit previews also run through the UI. The earlier two manual removals are retained during the new checks. Export combines a saved pitch edit with applied thinning, reimports immediately, verifies exact notes/tempo/controllers/duration and plays through native transport; Undo afterward restores the pitch edit. Restart verifies the remaining mixed history and settings. USB input open/close/reopen, MIDI guide output/cleanup, simulated-input isolation and PC-mute callback checks pass. These automated checks do not establish physical playing or optical illumination.
+
+An initial generated run passed; the first easy-file run caught a harness readiness race (`UI button disabled: Play`) before playback. The test had waited for the practice view to appear while Open was still completing. It now waits for enabled lesson controls after Open/save; no playback assertion was removed and no product behavior was changed. Both final runs above pass on the rebuilt executable. Local independent source reviews found no actionable backend/frontend regressions; the frontend review verified post-await revision/range/token guards. No external source review was sent.
+
+The closed normal library was copied to ignored `test-output/pre-040-user-library`. Read-only comparison after launching packaged 0.4.0 preserved schema 3, every row for five originals and two versions, all five MIDI hashes and preferences exactly. Evidence: `pre-040-baseline.json` and `normal-upgrade-040.json`. The Windows UI helper could list both 0.3.0 and the new 0.4.0 window but failed capture with `foreground window did not report a process id`. Automated native tests still ran through the app's own opt-in WebView harness; owner-operated physical checks are recorded separately below. No new screenshot or helper-based visual QA is claimed.
+
+The local license audit passes with 264 selected Windows Rust dependencies, 81 npm lock entries, and no unresolved package-notice selections. It refreshes only app/lock inventory records. Existing public-release provenance and copyright questions in `dependencies.md` remain separate.
+
+Final evidence: ignored `test-output/simplify-040-final` and `simplify-040-easy-final`. Tested and packaged executable SHA-256: `bdc9634a4503344df8293e36d5fc37a9c32c5c232906bfccef9b05931c1ca876`. The local NSIS installer and portable ZIP are built; all 580 portable files match their ZIP entries and source bytes, all 562 license/source files match, and release checksums validate (`package-040-verification.json`). No private songs or test libraries ship. Installer install/uninstall retention was previously verified for 0.1.0 and was not repeated for this release.
+
 ## 0.3.0 pitch editing and MIDI export — 12 October 2026
 
 The approved follow-up passed **134 Rust test executions** (56 unit + 63 library/transport integration + 15 export/model integration; 90 distinct cases; one optional benchmark ignored). Strict Clippy, Rust/Prettier formatting, TypeScript and the Windows production build passed. Tests cover all-or-nothing pitch bounds and stale revisions, sparse targets through actual transport, mixed Undo/restart, normalized pitch overrides, inherited edits with fresh history, schema-2 migration, older-editor refusal, 100-action/200,000-note history limits, and source/row preservation.
