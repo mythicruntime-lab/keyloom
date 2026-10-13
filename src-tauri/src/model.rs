@@ -122,6 +122,8 @@ pub struct LessonState {
     pub revision: u64,
     pub can_undo: bool,
     pub removed_count: usize,
+    #[serde(default)]
+    pub shifted_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,7 +135,14 @@ pub struct ImportResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{LibraryEntry, SongSettings};
+    use super::{LessonState, LibraryEntry, SongSettings};
+
+    #[test]
+    fn older_lesson_state_defaults_to_no_pitch_edits() {
+        let state: LessonState =
+            serde_json::from_str(r#"{"revision":2,"can_undo":true,"removed_count":1}"#).unwrap();
+        assert_eq!(state.shifted_count, 0);
+    }
 
     #[test]
     fn older_library_entries_default_to_originals() {

@@ -4,7 +4,7 @@ An original, offline Windows piano trainer built with Tauri 2, Rust, React, Type
 
 ## Run
 
-In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.2.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.2.0_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
+In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.3.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.3.0_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
 
 Windows 11 x64 and the installed Microsoft Edge WebView2 Evergreen Runtime are required. WebView2 is already present on the development machine. The package does not download or install it. No administrator access, Python, Node, Rust, account, server, internet connection or NVIDIA setting change is needed to run the built app.
 
@@ -32,18 +32,20 @@ Guide notes clear on pause, stop, seek, song/settings changes, guide disable, ou
 
 Open a song and choose **Save practice version**, give the copy a name, then **Create practice version**. It appears in the same library and has its own practice settings. The **Lesson version** selector switches between the original and its versions.
 
-In a practice version, choose **Edit notes**. Playback pauses while you select notes on the roll or in the note list. Use **Remove selected notes**, **Undo removal**, and **Done editing**. Each edit is saved immediately; the last 100 removal actions can be undone across app restarts. Saving another version copies its current notes with fresh Undo history. Range warnings flag notes outside your configured keyboard without transposing them. The imported original stays unchanged.
+In a practice version, choose **Edit notes**. Playback pauses while you select notes on the roll or in the note list. **Semitone down/up** moves the selection by one semitone; **Octave down/up** moves it by twelve. Selection stays active for repeated moves. **Remove selected notes** removes the selection, and **Undo edit** reverses either kind of edit. Use **Done editing** to return to practice. Note timing and duration stay unchanged. A whole move is disabled if any selected pitch would leave MIDI 0–127; notes are never clamped. Keyboard-range warnings still allow deliberate moves outside your physical range.
 
-Versions store their edits separately and refer to the original's managed MIDI. Remove dependent versions before removing that original from the library. Exporting an edited version, changing note pitch/timing, and automatic simplification are future work; original MIDI export remains byte-exact.
+Each edit saves immediately. Mixed Undo history survives restarts, retaining up to 100 actions and 200,000 individual note-change entries; large selections can retain fewer actions. Saving another practice version copies its current removals and pitches with fresh Undo history. The imported original stays unchanged. Existing original libraries and 0.2.0 practice versions remain compatible.
 
-Normal application data lives under `%LOCALAPPDATA%\app.keyloom.desktop`: `library.sqlite3`, managed `midi` originals and preferences. Source files are copied, never moved. Byte-identical files share one entry; different arrangements remain separate. Export writes the exact original bytes to a **new** destination filename. Removal asks for confirmation and deletes only the managed copy/record, never the external original. Keep the data directory when updating. Uninstall can retain this library; do not select an offered application-data deletion option if you want to keep your songs.
+Choose **Export MIDI** in the practice-version toolbar or arrangement details to save a **new** file. A version export includes all saved notes at original tempo; practice speed, part roles, hand split and loops do not alter the file. Original-song export remains byte-exact. Version export preserves source timing and non-note events, but does not retarget expressive pressure to moved pitches. Ambiguous overlapping same-pitch releases and empty versions cannot be exported; see [MIDI policy](docs/midi-policy.md).
+
+Versions store their edits separately and refer to the original's managed MIDI. Remove dependent versions before removing that original from the library. Normal application data lives under `%LOCALAPPDATA%\app.keyloom.desktop`: `library.sqlite3`, managed `midi` originals and preferences. Source files are copied, never moved. Byte-identical files share one entry; different arrangements remain separate. Export refuses existing destination files. Removal asks for confirmation and deletes only the managed copy/record, never the external original. Keep the data directory when updating. Uninstall can retain this library; do not select an offered application-data deletion option if you want to keep your songs.
 
 MIDI 0/1 with musical tick division are supported. Type 2 and SMPTE division receive explicit unsupported-format errors. See [MIDI policy](docs/midi-policy.md) for malformed input, event budgets, tempo conflicts, sustain and missing-release behavior.
 
 Open a file directly:
 
 ```powershell
-& .\artifacts\Keyloom-0.2.0-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
+& .\artifacts\Keyloom-0.3.0-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
 ```
 
 A second launch forwards the file to the running instance. During interactive installation you can optionally add Keyloom to Windows **Open with** for MIDI; the installer does not replace your default application. Silent installation skips that optional registration. Uninstall removes its own ordinary shortcuts. If you manually pinned Keyloom to the taskbar, unpin it manually after uninstall.
@@ -68,4 +70,4 @@ See [test report](docs/test-report.md), [hardware checklist](docs/hardware-check
 
 ## Release boundaries
 
-The first approved M4 slice supports practice versions and note removal/Undo. Pitch/time/duration editing, automatic chord simplification, edited MIDI export and recording remain deferred, along with M5–M6: MusicXML/OMR, transcription and downloading. No cloud, account system or LLM dependency exists. No commercial songs, fonts, samples or SoundFonts are distributed. The generated original demo and app icon are project assets. Third-party components retain their own terms; ship `THIRD_PARTY_NOTICES.md` and the complete `licenses` directory, including MPL source archives, with every package.
+The approved M4 work supports named practice versions, selected-note removal and semitone/octave moves, persistent mixed Undo, and edited MIDI export. Timing/duration editing, automatic chord thinning and recording remain deferred, along with M5–M6: MusicXML/OMR, transcription and downloading. No cloud, account system or LLM dependency exists. No commercial songs, fonts, samples or SoundFonts are distributed. The generated original demo and app icon are project assets. Third-party components retain their own terms; ship `THIRD_PARTY_NOTICES.md` and the complete `licenses` directory, including MPL source archives, with every package.

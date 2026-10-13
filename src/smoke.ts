@@ -16,6 +16,7 @@ interface SmokeConfig {
   expected_count: number;
   device_id?: string | null;
   output_device_id?: string | null;
+  export_path: string;
 }
 interface Check {
   name: string;
@@ -26,6 +27,7 @@ interface Check {
 const PERSISTED_TITLE = "Keyloom smoke · persisted arrangement";
 const PERSISTED_ARTIST = "Original generated test exercise";
 const PERSISTED_VARIANT = "Keyloom smoke · practice version";
+const EXPORTED_TITLE = "Keyloom edited export";
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
@@ -145,6 +147,31 @@ async function waitRemovedCount(count: number) {
       document.querySelector<HTMLElement>(".lesson-edit-summary")?.dataset
         .removedCount === String(count),
   );
+}
+async function waitShiftedCount(count: number) {
+  await waitFor(
+    `editor reports ${count} shifted notes`,
+    () =>
+      document.querySelector<HTMLElement>(".lesson-edit-summary")?.dataset
+        .shiftedCount === String(count),
+  );
+}
+function musicalNotes(song: OpenSong["song"]) {
+  return song.notes
+    .map(({ part_id, channel, pitch, velocity, start_tick, end_tick }) => [
+      part_id,
+      channel,
+      pitch,
+      velocity,
+      start_tick,
+      end_tick,
+    ])
+    .sort((a, b) => {
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return a[i] - b[i];
+      }
+      return 0;
+    });
 }
 async function setKeyboardRange(low: number, high: number) {
   const setEndpoint = async (endpoint: "low" | "high", value: number) => {
@@ -304,16 +331,17 @@ export async function runNativeSmoke() {
     );
     if (config.phase === "restart") {
       await check(
-        "restart retains two canonical arrangements and edited metadata",
+        "restart retains original arrangements, exported MIDI and edited metadata",
         async () => {
           const entries = await library();
           const originals = entries.filter((entry) => !entry.original_id);
           const variants = entries.filter((entry) => entry.original_id);
           assert(
-            originals.length === config.expected_count &&
+            originals.length === config.expected_count + 1 &&
+              originals.some((entry) => entry.title === EXPORTED_TITLE) &&
               variants.length === 1 &&
               variants[0].title === PERSISTED_VARIANT,
-            `Expected ${config.expected_count} original arrangements and one practice version after restart, got ${originals.length} originals and ${variants.length} versions`,
+            `Expected ${config.expected_count + 1} imported arrangements and one practice version after restart, got ${originals.length} originals and ${variants.length} versions`,
           );
           const first = entries.find(
             (entry) => entry.title === PERSISTED_TITLE,
@@ -371,7 +399,7 @@ export async function runNativeSmoke() {
         },
       );
       await check(
-        "practice version removals, independent settings and Undo survive restart",
+        "practice version pitch, removals, independent settings and mixed Undo survive restart",
         async () => {
           const entries = await library();
           const first = entries.find(
@@ -390,6 +418,21 @@ export async function runNativeSmoke() {
             .map((note) => note.id);
           await selectLesson(variant.id);
           const saved = await readOpenLesson(variant.id);
+          const shifted = saved.song.notes.filter(
+            (note) =>
+              note.pitch !==
+              original.song.notes.find((source) => source.id === note.id)
+                ?.pitch,
+          );
+          assert(
+            shifted.length === 1 &&
+              saved.lesson?.shifted_count === 1 &&
+              shifted[0].pitch ===
+                original.song.notes.find((note) => note.id === shifted[0].id)!
+                  .pitch +
+                  12,
+            "The exact octave move did not survive restart",
+          );
           assert(
             saved.lesson?.removed_count === removedIds.length &&
               saved.lesson.can_undo &&
@@ -414,7 +457,19 @@ export async function runNativeSmoke() {
           );
           button("Edit notes").click();
           await waitRemovedCount(removedIds.length);
-          button("Undo removal").click();
+          button("Undo edit").click();
+          await waitShiftedCount(0);
+          const pitchUndone = await readOpenLesson(variant.id);
+          assert(
+            JSON.stringify(pitchUndone.song.notes) ===
+              JSON.stringify(
+                original.song.notes.filter(
+                  (note) => !removedIds.includes(note.id),
+                ),
+              ),
+            "Mixed Undo did not restore pitch while retaining the earlier removal",
+          );
+          button("Undo edit").click();
           await waitRemovedCount(0);
           const restored = await readOpenLesson(variant.id);
           assert(
@@ -968,7 +1023,7 @@ export async function runNativeSmoke() {
           );
           button("Edit notes").click();
           await waitRemovedCount(removedIds.length);
-          button("Undo removal").click();
+          button("Undo edit").click();
           await waitRemovedCount(0);
           const restored = await readOpenLesson(variant.id);
           assert(
@@ -1099,6 +1154,176 @@ export async function runNativeSmoke() {
             keyboard_range_restored: true,
             editor_play_and_simulated_input_blocked: true,
             pending_play_did_not_escape_editor_pause: true,
+            physical_keyboard_verified: false,
+          };
+        },
+      );
+      await check(
+        "pitch controls, mixed Undo and export-to-import-to-play through native UI",
+        async () => {
+          const entries = await library();
+          const first = entries.find(
+            (entry) => entry.title === PERSISTED_TITLE,
+          )!;
+          const variant = entries.find(
+            (entry) => entry.title === PERSISTED_VARIANT,
+          )!;
+          const original = await readOpenLesson(first.id);
+          await selectLesson(variant.id);
+          const before = await readOpenLesson(variant.id);
+          button("Edit notes").click();
+          await waitShiftedCount(0);
+          const candidate = [...before.song.notes]
+            .sort((a, b) => a.start_ms - b.start_ms || a.id - b.id)
+            .slice(0, 48)
+            .find(
+              (note) =>
+                note.pitch >= 12 &&
+                note.pitch <= 114 &&
+                !before.song.notes.some(
+                  (other) =>
+                    other.id !== note.id &&
+                    other.part_id === note.part_id &&
+                    other.pitch === note.pitch + 12 &&
+                    other.start_tick < note.end_tick &&
+                    other.end_tick > note.start_tick,
+                ),
+            );
+          assert(
+            candidate,
+            "Fixture needs a visible octave-movable note without a merged-pitch overlap",
+          );
+          const verifyPitch = async (pitch: number) => {
+            await waitFor(
+              `note ${candidate.id} pitch ${pitch} in actual editor`,
+              () =>
+                document.querySelector<HTMLElement>(
+                  `[data-note-id="${candidate.id}"]`,
+                )?.dataset.notePitch === String(pitch),
+            );
+            const current = await readOpenLesson(variant.id);
+            assert(
+              JSON.stringify(current.song.notes) ===
+                JSON.stringify(
+                  before.song.notes.map((note) =>
+                    note.id === candidate.id ? { ...note, pitch } : note,
+                  ),
+                ),
+              "Pitch move changed other notes or timing",
+            );
+            return current;
+          };
+          for (const [up, down, amount] of [
+            ["Semitone up", "Semitone down", 1],
+            ["Octave up", "Octave down", 12],
+          ] as const) {
+            await selectNotes([candidate.id]);
+            button(up).click();
+            await verifyPitch(candidate.pitch + amount);
+            assert(
+              get<HTMLElement>(".lesson-edit-summary").dataset.selectedCount ===
+                "1",
+              "Pitch move lost selection",
+            );
+            button(down).click();
+            await verifyPitch(candidate.pitch);
+            button("Undo edit").click();
+            await verifyPitch(candidate.pitch + amount);
+            button("Undo edit").click();
+            await verifyPitch(candidate.pitch);
+          }
+          await selectNotes([candidate.id]);
+          button("Octave up").click();
+          await verifyPitch(candidate.pitch + 12);
+          button("Remove selected notes").click();
+          await waitRemovedCount(3);
+          await waitShiftedCount(0);
+          button("Undo edit").click();
+          await waitRemovedCount(2);
+          await waitShiftedCount(1);
+          const edited = await verifyPitch(candidate.pitch + 12);
+          button("Done editing").click();
+          button("Export MIDI", get(".lesson-version-bar")).click();
+          await waitFor("export success contains actual new file path", () =>
+            document.body.textContent?.includes(config.export_path),
+          );
+          await invoke("smoke_open_files", { paths: [config.export_path] });
+          const exported = await waitFor(
+            "exported MIDI immediately added to native library",
+            async () =>
+              (await library()).find((entry) => entry.title === EXPORTED_TITLE),
+          );
+          const importBanner = await waitFor(
+            "exported MIDI ready banner in practice view",
+            () => {
+              const banner =
+                document.querySelector<HTMLElement>(".import-banner");
+              return banner?.textContent?.includes(EXPORTED_TITLE)
+                ? banner
+                : null;
+            },
+          );
+          button("Open", importBanner).click();
+          await waitFor("exported MIDI opened from ready banner", () =>
+            document.querySelector(
+              `.practice-view[data-song-id="${exported.id}"]`,
+            ),
+          );
+          const reimported = await readOpenLesson(exported.id);
+          assert(
+            JSON.stringify(musicalNotes(reimported.song)) ===
+              JSON.stringify(musicalNotes(edited.song)),
+            "Exported MIDI changed edited note pitches, timing, velocities or tracks",
+          );
+          assert(
+            reimported.song.ppq === edited.song.ppq &&
+              reimported.song.duration_ms === edited.song.duration_ms &&
+              JSON.stringify(reimported.song.tempos) ===
+                JSON.stringify(edited.song.tempos) &&
+              JSON.stringify(reimported.song.controllers) ===
+                JSON.stringify(edited.song.controllers) &&
+              reimported.settings.speed === 1,
+            "Export baked practice speed or changed original musical timing/controllers",
+          );
+          button("Listen").click();
+          button("Play").click();
+          await waitFor(
+            "reimported MIDI actually plays",
+            async () => (await snapshot()).transport.position_ms > 60,
+          );
+          button("Pause").click();
+          await waitFor(
+            "reimported MIDI pauses",
+            async () => !(await snapshot()).transport.playing,
+          );
+          await navigate("Library", ".library-view");
+          button(
+            "Practice",
+            get(`.song-row[data-song-id="${first.id}"]`),
+          ).click();
+          await waitFor("original restored after exported playback", () =>
+            document.querySelector(
+              `.practice-view[data-song-id="${first.id}"]`,
+            ),
+          );
+          const untouched = await readOpenLesson(first.id);
+          assert(
+            JSON.stringify(untouched.song) === JSON.stringify(original.song) &&
+              JSON.stringify(untouched.settings) ===
+                JSON.stringify(original.settings),
+            "Export workflow changed original data/settings",
+          );
+          return {
+            original_id: first.id,
+            practice_version_id: variant.id,
+            exported_id: exported.id,
+            export_path: config.export_path,
+            shifted_note_id: candidate.id,
+            original_pitch: candidate.pitch,
+            edited_pitch: candidate.pitch + 12,
+            exported_note_count: reimported.song.notes.length,
+            exact_musical_roundtrip: true,
+            native_reimport_playback: true,
             physical_keyboard_verified: false,
           };
         },

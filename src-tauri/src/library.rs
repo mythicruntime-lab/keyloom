@@ -2,8 +2,9 @@ pub use crate::model::{ImportResult, LessonState, LibraryEntry};
 use crate::model::{Song, SongSettings};
 use crate::parser::{self, MAX_FILE_BYTES};
 use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,11 +13,44 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const ENTRY_COLUMNS: &str = "id,title,artist,tags,arrangement,favorite,imported_at,last_played,duration_ms,parts_count,note_count,original_id";
 const MAX_METADATA_CHARS: usize = 2_048;
 const MAX_UNDO_BATCHES: usize = 100;
+const MAX_UNDO_NOTE_CHANGES: usize = 200_000;
+const MAX_EDIT_JSON_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum UndoEdit {
+    Remove { note_ids: Vec<u32> },
+    Pitch { previous: Vec<(u32, u8)> },
+}
+
+impl UndoEdit {
+    fn note_count(&self) -> usize {
+        match self {
+            Self::Remove { note_ids } => note_ids.len(),
+            Self::Pitch { previous } => previous.len(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UndoHistory {
+    version: u8,
+    operations: Vec<UndoEdit>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredHistory {
+    Current(UndoHistory),
+    Legacy(Vec<Vec<u32>>),
+}
 
 struct VariantEdit {
     original_id: String,
     removed: BTreeSet<u32>,
-    undo: Vec<Vec<u32>>,
+    pitches: BTreeMap<u32, u8>,
+    undo: Vec<UndoEdit>,
     revision: u64,
 }
 
@@ -50,6 +84,7 @@ impl Library {
                 favorite INTEGER NOT NULL DEFAULT 0, imported_at INTEGER NOT NULL,
                 last_played INTEGER, settings_json TEXT NOT NULL,
                 removed_json TEXT NOT NULL DEFAULT '[]', undo_json TEXT NOT NULL DEFAULT '[]',
+                pitch_json TEXT NOT NULL DEFAULT '{}',
                 removed_count INTEGER NOT NULL DEFAULT 0 CHECK(removed_count>=0),
                 revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), search_text TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS variants_original ON variants(original_id);
@@ -70,9 +105,43 @@ impl Library {
                     s.note_count-v.removed_count,v.original_id,
                     v.settings_json,v.search_text,s.state,v.variant_id
                 FROM variants v JOIN songs s ON s.id=v.original_id;
-            PRAGMA user_version=2;",
+            ",
         )
         .map_err(db_error)?;
+        // Older releases overwrite user_version on startup. Inspect the actual
+        // schema instead; this additive migration preserves every existing row.
+        let has_pitch_column = {
+            let mut statement = db
+                .prepare("PRAGMA table_info(variants)")
+                .map_err(db_error)?;
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(db_error)?;
+            names
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db_error)?
+                .iter()
+                .any(|name| name == "pitch_json")
+        };
+        if !has_pitch_column {
+            db.execute(
+                "ALTER TABLE variants ADD COLUMN pitch_json TEXT NOT NULL DEFAULT '{}'",
+                [],
+            )
+            .map_err(db_error)?;
+        }
+        db.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS protect_mixed_variant_history
+                BEFORE UPDATE OF undo_json,pitch_json ON variants
+                WHEN (substr(ltrim(OLD.undo_json),1,1)='{' OR NEW.pitch_json<>'{}')
+                    AND substr(ltrim(NEW.undo_json),1,1)<>'{'
+                BEGIN SELECT RAISE(ABORT,'This practice version needs the newer Keyloom editor; pitch history must be preserved.'); END;
+             CREATE TRIGGER IF NOT EXISTS protect_mixed_variant_insert
+                BEFORE INSERT ON variants WHEN NEW.pitch_json<>'{}'
+                    AND substr(ltrim(NEW.undo_json),1,1)<>'{'
+                BEGIN SELECT RAISE(ABORT,'Pitch-edited versions require the newer Keyloom history format.'); END;
+             PRAGMA user_version=3;"
+        ).map_err(db_error)?;
         let mut library = Self { root, db };
         library.recover()?;
         Ok(library)
@@ -190,7 +259,7 @@ impl Library {
             .ok_or_else(|| "This song is not available in the managed library.".into())
     }
 
-    /// A variant owns only metadata, settings and reversible note-ID removals.
+    /// A variant owns only metadata, settings and reversible note-ID edits.
     /// Its root original's bytes, row and canonical model remain untouched.
     pub fn create_variant(&mut self, source_id: &str, title: &str) -> Result<LibraryEntry, String> {
         let mut source = self.entry(source_id)?;
@@ -202,20 +271,25 @@ impl Library {
             .as_deref()
             .unwrap_or(source_id)
             .to_string();
-        let removed = if source.original_id.is_some() {
-            self.variant_edit(source_id)?.removed
+        let (removed, pitches) = if source.original_id.is_some() {
+            let edit = self.variant_edit(source_id)?;
+            (edit.removed, edit.pitches)
         } else {
-            BTreeSet::new()
+            (BTreeSet::new(), BTreeMap::new())
         };
         let removed_json = serde_json::to_string(&removed).map_err(json_error)?;
+        let pitch_json = serde_json::to_string(&pitches).map_err(json_error)?;
+        // Even a clone with no undo operations must be unreadable to old editors
+        // that do not know about its inherited pitch overrides.
+        let undo_json = history_json(&[])?;
         let settings_json =
             serde_json::to_string(&self.settings(source_id)?).map_err(json_error)?;
         let tx = self.db.transaction().map_err(db_error)?;
         let changed = tx
             .execute(
                 "INSERT INTO variants(original_id,title,artist,tags,arrangement,favorite,
-                imported_at,settings_json,removed_json,removed_count,search_text)
-             SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11
+                imported_at,settings_json,removed_json,removed_count,search_text,pitch_json,undo_json)
+             SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13
              FROM songs WHERE id=?1 AND state='ready'",
                 params![
                     original_id,
@@ -228,7 +302,9 @@ impl Library {
                     settings_json,
                     removed_json,
                     removed.len() as u32,
-                    search_text(&source)
+                    search_text(&source),
+                    pitch_json,
+                    undo_json
                 ],
             )
             .map_err(db_error)?;
@@ -250,6 +326,11 @@ impl Library {
             revision: edit.revision,
             can_undo: !edit.undo.is_empty(),
             removed_count: edit.removed.len(),
+            shifted_count: edit
+                .pitches
+                .keys()
+                .filter(|id| !edit.removed.contains(id))
+                .count(),
         }))
     }
 
@@ -299,23 +380,98 @@ impl Library {
             }
         }
         edit.removed.extend(batch.iter().copied());
-        edit.undo.push(batch.into_iter().collect());
-        if edit.undo.len() > MAX_UNDO_BATCHES {
-            edit.undo.remove(0);
+        edit.undo.push(UndoEdit::Remove {
+            note_ids: batch.into_iter().collect(),
+        });
+        trim_history(&mut edit.undo);
+        self.save_variant_edit(id, expected_revision, &edit)
+    }
+
+    /// Move only selected visible stable IDs. Validate every new pitch before
+    /// changing any persisted state, preserving timing, velocity and part IDs.
+    pub fn transpose_notes(
+        &mut self,
+        id: &str,
+        expected_revision: u64,
+        note_ids: &[u32],
+        semitones: i16,
+    ) -> Result<(), String> {
+        if ![-12, -1, 1, 12].contains(&semitones) {
+            return Err("Move notes by exactly -12, -1, +1 or +12 semitones.".into());
         }
+        let mut edit = self.variant_edit(id)?;
+        check_revision(edit.revision, expected_revision)?;
+        if note_ids.is_empty() || note_ids.len() > parser::MAX_NOTES {
+            return Err("Select at least one note within the song's note limit.".into());
+        }
+        let selected: BTreeSet<u32> = note_ids.iter().copied().collect();
+        if selected.len() != note_ids.len() {
+            return Err("A pitch move cannot contain repeated note IDs.".into());
+        }
+        let original = self.load(&edit.original_id)?;
+        let original_pitches: BTreeMap<u32, u8> = original
+            .notes
+            .iter()
+            .map(|note| (note.id, note.pitch))
+            .collect();
+        let mut previous = Vec::with_capacity(selected.len());
+        for note_id in selected {
+            let original_pitch = original_pitches.get(&note_id).ok_or_else(|| {
+                format!("Unknown stable note ID {note_id}; no notes were changed.")
+            })?;
+            if edit.removed.contains(&note_id) {
+                return Err(format!(
+                    "Note {note_id} is removed; undo its removal before moving it."
+                ));
+            }
+            let pitch = edit
+                .pitches
+                .get(&note_id)
+                .copied()
+                .unwrap_or(*original_pitch);
+            let moved = i16::from(pitch) + semitones;
+            if !(0..=127).contains(&moved) {
+                return Err(format!("Moving note {note_id} would leave MIDI pitch range 0–127; no notes were changed."));
+            }
+            previous.push((note_id, pitch));
+        }
+        for &(note_id, pitch) in &previous {
+            set_pitch(
+                &mut edit.pitches,
+                &original_pitches,
+                note_id,
+                (i16::from(pitch) + semitones) as u8,
+            )?;
+        }
+        edit.undo.push(UndoEdit::Pitch { previous });
+        trim_history(&mut edit.undo);
         self.save_variant_edit(id, expected_revision, &edit)
     }
 
     pub fn undo_notes(&mut self, id: &str, expected_revision: u64) -> Result<(), String> {
         let mut edit = self.variant_edit(id)?;
         check_revision(edit.revision, expected_revision)?;
-        self.load(&edit.original_id)?;
+        let original = self.load(&edit.original_id)?;
+        let original_pitches: BTreeMap<u32, u8> = original
+            .notes
+            .iter()
+            .map(|note| (note.id, note.pitch))
+            .collect();
         let batch = edit
             .undo
             .pop()
-            .ok_or("No note removal is available to undo.")?;
-        for note in batch {
-            edit.removed.remove(&note);
+            .ok_or("No note edit is available to undo.")?;
+        match batch {
+            UndoEdit::Remove { note_ids } => {
+                for note in note_ids {
+                    edit.removed.remove(&note);
+                }
+            }
+            UndoEdit::Pitch { previous } => {
+                for (note, pitch) in previous {
+                    set_pitch(&mut edit.pitches, &original_pitches, note, pitch)?;
+                }
+            }
         }
         self.save_variant_edit(id, expected_revision, &edit)
     }
@@ -372,7 +528,7 @@ impl Library {
         let record = self
             .db
             .query_row(
-                "SELECT v.original_id,v.removed_json,v.undo_json,v.revision FROM variants v
+                "SELECT v.original_id,v.removed_json,v.undo_json,v.revision,v.pitch_json FROM variants v
              JOIN songs s ON s.id=v.original_id WHERE v.variant_id=?1 AND s.state='ready'",
                 [number],
                 |row| {
@@ -381,6 +537,7 @@ impl Library {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
@@ -388,22 +545,45 @@ impl Library {
             .map_err(db_error)?
             .ok_or("Practice variant is unavailable; recover its original MIDI first.")?;
         validate_original_id(&record.0)?;
-        if record.1.len() > parser::MAX_NOTES * 12
-            || record.2.len() > parser::MAX_NOTES * 12 + MAX_UNDO_BATCHES * 2
-        {
+        if record.1.len() + record.2.len() + record.4.len() > MAX_EDIT_JSON_BYTES {
             return Err("Saved practice edits exceed the note safety limit.".into());
         }
         let removed: BTreeSet<u32> = serde_json::from_str(&record.1).map_err(json_error)?;
-        let undo: Vec<Vec<u32>> = serde_json::from_str(&record.2).map_err(json_error)?;
-        let mut undo_notes = HashSet::new();
+        let pitches: BTreeMap<u32, u8> = serde_json::from_str(&record.4).map_err(json_error)?;
+        let undo = match serde_json::from_str::<StoredHistory>(&record.2).map_err(json_error)? {
+            StoredHistory::Current(history) => {
+                if history.version != 1 {
+                    return Err("This practice history requires a newer Keyloom editor.".into());
+                }
+                history.operations
+            }
+            StoredHistory::Legacy(batches) => batches
+                .into_iter()
+                .map(|note_ids| UndoEdit::Remove { note_ids })
+                .collect(),
+        };
+        let mut removed_history = HashSet::new();
         if removed.len() > parser::MAX_NOTES
+            || pitches.len() > parser::MAX_NOTES
+            || pitches.values().any(|pitch| *pitch > 127)
             || undo.len() > MAX_UNDO_BATCHES
+            || undo.iter().map(UndoEdit::note_count).sum::<usize>() > MAX_UNDO_NOTE_CHANGES
             || record.3 < 0
-            || undo.iter().any(|batch| {
-                batch.is_empty()
-                    || batch
+            || undo.iter().any(|operation| {
+                if operation.note_count() == 0 || operation.note_count() > parser::MAX_NOTES {
+                    return true;
+                }
+                match operation {
+                    UndoEdit::Remove { note_ids } => note_ids
                         .iter()
-                        .any(|note| !removed.contains(note) || !undo_notes.insert(*note))
+                        .any(|note| !removed.contains(note) || !removed_history.insert(*note)),
+                    UndoEdit::Pitch { previous } => {
+                        let mut seen = HashSet::new();
+                        previous
+                            .iter()
+                            .any(|(note, pitch)| *pitch > 127 || !seen.insert(*note))
+                    }
+                }
             })
         {
             return Err("Saved practice edit history is invalid.".into());
@@ -411,6 +591,7 @@ impl Library {
         Ok(VariantEdit {
             original_id: record.0,
             removed,
+            pitches,
             undo,
             revision: record.3 as u64,
         })
@@ -428,13 +609,17 @@ impl Library {
             .filter(|next| *next <= i64::MAX as u64)
             .ok_or("Practice revision limit reached; create a new variant.")?;
         let removed_json = serde_json::to_string(&edit.removed).map_err(json_error)?;
-        let undo_json = serde_json::to_string(&edit.undo).map_err(json_error)?;
+        let undo_json = history_json(&edit.undo)?;
+        let pitch_json = serde_json::to_string(&edit.pitches).map_err(json_error)?;
+        if removed_json.len() + undo_json.len() + pitch_json.len() > MAX_EDIT_JSON_BYTES {
+            return Err("Practice edit data exceeds the 16 MiB safety limit.".into());
+        }
         // One compare-and-swap statement commits the full batch, history, count
         // and revision together. A stale second editor cannot overwrite it.
         let changed = self
             .db
             .execute(
-                "UPDATE variants SET removed_json=?2,undo_json=?3,removed_count=?4,revision=?5
+                "UPDATE variants SET removed_json=?2,undo_json=?3,removed_count=?4,revision=?5,pitch_json=?7
              WHERE variant_id=?1 AND revision=?6 AND EXISTS
                 (SELECT 1 FROM songs WHERE id=variants.original_id AND state='ready')",
                 params![
@@ -443,7 +628,8 @@ impl Library {
                     undo_json,
                     edit.removed.len() as u32,
                     next as i64,
-                    expected_revision as i64
+                    expected_revision as i64,
+                    pitch_json
                 ],
             )
             .map_err(db_error)?;
@@ -471,6 +657,11 @@ impl Library {
             let edit = self.variant_edit(id)?;
             let mut song = self.load(&edit.original_id)?;
             song.notes.retain(|note| !edit.removed.contains(&note.id));
+            for note in &mut song.notes {
+                if let Some(pitch) = edit.pitches.get(&note.id) {
+                    note.pitch = *pitch;
+                }
+            }
             let mut counts = std::collections::HashMap::new();
             for note in &song.notes {
                 *counts.entry(note.part_id).or_insert(0_usize) += 1;
@@ -603,19 +794,21 @@ impl Library {
         Ok(())
     }
 
-    /// Exact-byte export, using create_new so an external original is never overwritten.
+    /// Originals export byte-for-byte; versions preserve source events with
+    /// their edited notes. create_new prevents overwriting any existing file.
     pub fn export(&self, id: &str, destination: &Path) -> Result<(), String> {
         validate_id(id)?;
-        if variant_number(id)?.is_some() {
-            return Err(
-                "Edited MIDI export is not yet available. Export the original MIDI instead.".into(),
-            );
-        }
-        self.entry(id)?;
-        let bytes = read_bounded(&self.managed_path(id)?)?;
-        if content_id(&bytes) != id {
+        let entry = self.entry(id)?;
+        let original_id = entry.original_id.as_deref().unwrap_or(id);
+        let source = read_bounded(&self.managed_path(original_id)?)?;
+        if content_id(&source) != original_id {
             return Err("The managed MIDI copy failed its content-hash check.".into());
         }
+        let bytes = if entry.original_id.is_some() {
+            crate::exporter::edited_midi(&source, &self.load(id)?)?
+        } else {
+            source
+        };
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -796,6 +989,46 @@ fn validate_original_id(id: &str) -> Result<(), String> {
 fn check_revision(actual: u64, expected: u64) -> Result<(), String> {
     if actual != expected {
         return Err("Practice variant changed; refresh before editing or undoing.".into());
+    }
+    Ok(())
+}
+
+fn trim_history(undo: &mut Vec<UndoEdit>) {
+    let mut notes = undo.iter().map(UndoEdit::note_count).sum::<usize>();
+    while undo.len() > MAX_UNDO_BATCHES || notes > MAX_UNDO_NOTE_CHANGES {
+        notes -= undo.remove(0).note_count();
+    }
+}
+
+fn history_json(operations: &[UndoEdit]) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct History<'a> {
+        version: u8,
+        operations: &'a [UndoEdit],
+    }
+    serde_json::to_string(&History {
+        version: 1,
+        operations,
+    })
+    .map_err(json_error)
+}
+
+fn set_pitch(
+    pitches: &mut BTreeMap<u32, u8>,
+    original: &BTreeMap<u32, u8>,
+    note: u32,
+    pitch: u8,
+) -> Result<(), String> {
+    let source = original
+        .get(&note)
+        .ok_or("Pitch history contains an unknown stable note ID.")?;
+    if pitch > 127 {
+        return Err("Pitch history is outside MIDI range 0–127.".into());
+    }
+    if pitch == *source {
+        pitches.remove(&note);
+    } else {
+        pitches.insert(note, pitch);
     }
     Ok(())
 }

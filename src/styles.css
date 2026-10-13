@@ -1047,7 +1047,7 @@ main {
   display: flex;
   gap: 17px;
   min-height: 350px;
-  height: calc(100vh - 386px);
+  height: calc(100vh - 386px - var(--export-note-space, 0px));
   max-height: 1000px;
 }
 .roll-panel {
@@ -1604,7 +1604,7 @@ fieldset.transport-checks {
   width: 100%;
 }
 .fullscreen .practice-body {
-  height: calc(100vh - 386px);
+  height: calc(100vh - 386px - var(--export-note-space, 0px));
   max-height: none;
 }
 @media (min-width: 1600px) {
@@ -1667,7 +1667,7 @@ fieldset.transport-checks {
     padding: 32px 38px 22px;
   }
   .practice-body {
-    height: calc(100vh - 413px);
+    height: calc(100vh - 413px - var(--export-note-space, 0px));
   }
   .part-title > span {
     font-size: 13px;
@@ -1863,7 +1863,7 @@ fieldset.transport-checks {
     font-size: 12px;
   }
   .practice-body {
-    height: calc(100vh - 411px);
+    height: calc(100vh - 411px - var(--export-note-space, 0px));
     gap: 11px;
     min-height: 330px;
   }
@@ -1921,7 +1921,19 @@ fieldset.transport-checks {
 /* Import success remains visible without pushing the practice transport below
    a normal desktop window. Match the direct banner rendered above this view. */
 main:has(> .import-banner) .practice-body {
-  height: calc(100vh - 484px);
+  height: calc(100vh - 484px - var(--export-note-space, 0px));
+}
+.practice-view:has(> .lesson-export-note) {
+  --export-note-space: 24px;
+}
+.lesson-export-note {
+  color: #95aaa9;
+  font-size: 10px;
+  line-height: 1.5;
+  margin: -4px 0 12px;
+}
+.export-result {
+  overflow-wrap: anywhere;
 }
 .version-badge {
   display: inline-block;
@@ -2016,6 +2028,22 @@ main:has(> .import-banner) .practice-body {
 }
 .lesson-edit-summary strong {
   color: #e1ebde;
+}
+.lesson-edit-summary {
+  flex-wrap: wrap;
+}
+.lesson-pitch-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.lesson-pitch-actions .small-button {
+  padding: 8px 6px;
+  border-color: #41685d;
+  background: #213e3a;
+}
+.lesson-pitch-actions .small-button:not(:disabled):hover {
+  background: #31584c;
 }
 .lesson-edit-actions {
   display: flex;
@@ -2115,6 +2143,9 @@ main:has(> .import-banner) .practice-body {
   padding: 12px;
 }
 @media (max-width: 1250px) {
+  .practice-view:has(> .lesson-export-note) {
+    --export-note-space: 39px;
+  }
   .lesson-version-detail {
     display: none;
   }

@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { LessonState, Preferences, Song, noteName, timeLabel } from "./types";
+import {
+  LessonState,
+  PitchShift,
+  Preferences,
+  Song,
+  noteName,
+  timeLabel,
+} from "./types";
 
 interface Props {
   song: Song;
@@ -13,6 +20,7 @@ interface Props {
   onClear: () => void;
   onSeek: (ms: number) => void;
   onRemove: () => void;
+  onTranspose: (semitones: PitchShift) => void;
   onUndo: () => void;
   onDone: () => void;
 }
@@ -30,6 +38,7 @@ export default function LessonEditor({
   onClear,
   onSeek,
   onRemove,
+  onTranspose,
   onUndo,
   onDone,
 }: Props) {
@@ -50,6 +59,22 @@ export default function LessonEditor({
       ),
     [song],
   );
+  const selectedBounds = useMemo(() => {
+    let low = 128,
+      high = -1,
+      count = 0;
+    for (const note of song.notes) {
+      if (!selected.has(note.id)) continue;
+      low = Math.min(low, note.pitch);
+      high = Math.max(high, note.pitch);
+      count++;
+    }
+    return { low, high, count };
+  }, [song, selected]);
+  const canTranspose = (semitones: PitchShift) =>
+    selectedBounds.count > 0 &&
+    selectedBounds.low + semitones >= 0 &&
+    selectedBounds.high + semitones <= 127;
   const outside = (pitch: number) =>
     pitch < preferences.low || pitch > preferences.high;
   const outsideCount = useMemo(
@@ -85,18 +110,50 @@ export default function LessonEditor({
         </button>
       </div>
       <p className="help-text">
-        Playback is paused. Select notes on the roll or in this list, then
-        remove them from this version. The original is unchanged.
+        Playback is paused. Select notes on the roll or in this list, then move
+        or remove them from this version. The original is unchanged.
       </p>
       <div
         className="lesson-edit-summary"
         data-selected-count={selected.size}
         data-removed-count={lesson.removed_count}
+        data-shifted-count={lesson.shifted_count ?? 0}
         aria-live="polite"
       >
         <strong>{selected.size} selected</strong>
-        <span>{lesson.removed_count} removed</span>
+        <span>
+          {lesson.removed_count} removed · {lesson.shifted_count ?? 0} shifted
+        </span>
       </div>
+      <div
+        className="lesson-pitch-actions"
+        role="group"
+        aria-label="Move selected notes"
+      >
+        {(
+          [
+            [-12, "Octave down"],
+            [-1, "Semitone down"],
+            [1, "Semitone up"],
+            [12, "Octave up"],
+          ] as const
+        ).map(([semitones, label]) => (
+          <button
+            key={semitones}
+            className="small-button"
+            aria-label={label}
+            aria-describedby="pitch-move-limits"
+            disabled={saving || !canTranspose(semitones)}
+            onClick={() => onTranspose(semitones)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="help-text" id="pitch-move-limits">
+        The whole selection must stay within MIDI 0–127; notes are never
+        clamped. Moving outside your keyboard range is allowed.
+      </p>
       <div className="lesson-edit-actions">
         <button
           className="button primary"
@@ -110,7 +167,7 @@ export default function LessonEditor({
           disabled={saving || !lesson.can_undo}
           onClick={onUndo}
         >
-          Undo removal
+          Undo edit
         </button>
         <button
           className="small-button"
@@ -163,6 +220,7 @@ export default function LessonEditor({
           <div
             className={`lesson-note-row ${selected.has(note.id) ? "selected" : ""}`}
             data-note-id={note.id}
+            data-note-pitch={note.pitch}
             key={note.id}
           >
             <label>
@@ -223,9 +281,8 @@ export default function LessonEditor({
         </button>
       </div>
       <p className="help-text">
-        Changes save after each removal or Undo. Undo keeps your last 100
-        removals. This editor removes notes only. MIDI export for practice
-        versions is not available yet.
+        Changes save after each edit or Undo. Undo keeps up to 100 edits; very
+        large selections retain fewer. Note timing and duration stay unchanged.
       </p>
     </aside>
   );

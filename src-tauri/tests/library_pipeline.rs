@@ -1,3 +1,5 @@
+#[path = "../src/exporter.rs"]
+mod exporter;
 #[path = "../src/fixtures.rs"]
 mod fixtures;
 #[path = "../src/library.rs"]
@@ -631,7 +633,8 @@ fn variants_restart_undo_independent_settings_and_copy_current_variant_view() {
         model::LessonState {
             revision: 0,
             can_undo: false,
-            removed_count: 1
+            removed_count: 1,
+            shifted_count: 0
         }
     );
     assert!(library.undo_notes(&second.id, 0).is_err());
@@ -656,7 +659,8 @@ fn variants_restart_undo_independent_settings_and_copy_current_variant_view() {
         model::LessonState {
             revision: 1,
             can_undo: true,
-            removed_count: 1
+            removed_count: 1,
+            shifted_count: 0
         }
     );
     library.undo_notes(&first.id, 1).unwrap();
@@ -666,7 +670,8 @@ fn variants_restart_undo_independent_settings_and_copy_current_variant_view() {
         model::LessonState {
             revision: 2,
             can_undo: false,
-            removed_count: 0
+            removed_count: 0,
+            shifted_count: 0
         }
     );
     assert_eq!(
@@ -731,7 +736,8 @@ fn variant_edit_validation_and_stale_revisions_are_atomic() {
         model::LessonState {
             revision: 2,
             can_undo: true,
-            removed_count: 2
+            removed_count: 2,
+            shifted_count: 0
         }
     );
     for id in [
@@ -861,7 +867,7 @@ fn empty_variant_is_safe_for_every_practice_mode_and_export_never_writes() {
     assert!(library
         .export(&variant.id, &destination)
         .unwrap_err()
-        .contains("not yet available"));
+        .contains("no notes to export"));
     assert!(!destination.exists());
     let existing = directory.write("untouched.mid", b"existing external file");
     assert!(library.export(&variant.id, &existing).is_err());
@@ -904,7 +910,8 @@ fn variant_undo_is_persistently_bounded_to_the_last_hundred_batches() {
         model::LessonState {
             revision: 201,
             can_undo: false,
-            removed_count: 1
+            removed_count: 1,
+            shifted_count: 0
         }
     );
     assert_eq!(library.load(&variant.id).unwrap().notes.len(), 100);
@@ -940,4 +947,451 @@ fn schema_one_library_upgrades_additively_without_rewriting_song_rows() {
         .unwrap();
     assert_eq!(library.versions(&variant.id).unwrap().len(), 2);
     assert_eq!(original_row(&root, &original.id), before);
+}
+
+fn stored_variant_json(root: &Path, id: &str) -> (String, String) {
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    db.query_row(
+        "SELECT pitch_json,undo_json FROM variants WHERE 'variant-'||variant_id=?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .unwrap()
+}
+
+#[test]
+fn sparse_pitch_moves_preserve_originals_and_drive_real_transport_and_mixed_undo() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let bytes = sparse_note_fixture();
+    let source = directory.write("unchanged.mid", &bytes);
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let original_song = library.load(&original.id).unwrap();
+    let original_before = original_row(&root, &original.id);
+    let variant = library.create_variant(&original.id, "Moved notes").unwrap();
+    let mut settings = library.settings(&variant.id).unwrap();
+    settings.speed = 0.75;
+    library.save_settings(&variant.id, &settings).unwrap();
+    library.remove_notes(&variant.id, 0, &[0, 2]).unwrap();
+    library
+        .transpose_notes(&variant.id, 1, &[3, 1], 12)
+        .unwrap();
+    let edited = library.load(&variant.id).unwrap();
+    assert_eq!(
+        edited
+            .notes
+            .iter()
+            .map(|note| (note.id, note.pitch))
+            .collect::<Vec<_>>(),
+        vec![(1, 76), (3, 84)]
+    );
+    for note in &edited.notes {
+        let mut expected = original_song
+            .notes
+            .iter()
+            .find(|source| source.id == note.id)
+            .unwrap()
+            .clone();
+        expected.pitch += 12;
+        assert_eq!(
+            *note, expected,
+            "timing, velocity, part and channel must not change"
+        );
+    }
+    assert_eq!(edited.duration_ms, original_song.duration_ms);
+    assert_eq!(edited.tempos, original_song.tempos);
+    assert_eq!(edited.controllers, original_song.controllers);
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .shifted_count,
+        2
+    );
+    let mut engine = transport::Engine::new();
+    engine.load(edited.clone(), settings.clone());
+    engine.play();
+    let played: Vec<_> = engine
+        .advance(1000.0)
+        .into_iter()
+        .filter_map(|event| match event {
+            transport::VoiceEvent::On { key, pitch, .. } => Some((key, pitch)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(played, vec![(1, 76), (3, 84)]);
+    settings.mode = "wait".into();
+    engine.load(edited, settings);
+    engine.play();
+    engine.advance(1000.0);
+    assert_eq!(engine.guide_targets().unwrap().1, vec![76]);
+    engine.input(76, true, 80, transport::InputSource::Physical);
+    assert_eq!(engine.snapshot().correct, 1);
+
+    library.remove_notes(&variant.id, 2, &[1]).unwrap();
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .shifted_count,
+        1
+    );
+    drop(library);
+    let mut library = Library::open(root.clone()).unwrap();
+    library.undo_notes(&variant.id, 3).unwrap(); // Restore removal, including its shifted pitch.
+    assert_eq!(library.load(&variant.id).unwrap().notes[0].pitch, 76);
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .shifted_count,
+        2
+    );
+    library.undo_notes(&variant.id, 4).unwrap(); // Restore pitches, keeping earlier sparse removal.
+    assert_eq!(
+        library
+            .load(&variant.id)
+            .unwrap()
+            .notes
+            .iter()
+            .map(|note| (note.id, note.pitch))
+            .collect::<Vec<_>>(),
+        vec![(1, 64), (3, 72)]
+    );
+    library.undo_notes(&variant.id, 5).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap(), original_song);
+    assert_eq!(library.settings(&variant.id).unwrap().speed, 0.75);
+    assert_eq!(library.settings(&original.id).unwrap().speed, 1.0);
+    assert_eq!(original_row(&root, &original.id), original_before);
+    assert_eq!(fs::read(&source).unwrap(), bytes);
+    assert_eq!(
+        fs::read(root.join("midi").join(format!("{}.mid", original.id))).unwrap(),
+        bytes
+    );
+}
+
+#[test]
+fn pitch_boundaries_invalid_batches_stale_edits_and_normalization_are_atomic() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let mut events = Vec::new();
+    for pitch in [0, 60, 127] {
+        events.push((0, vec![0x90, pitch, 80]));
+        events.push((120, vec![0x80, pitch, 0]));
+    }
+    events.push((0, vec![0xff, 0x2f, 0]));
+    let source = directory.write(
+        "boundaries.mid",
+        &fixtures::smf(0, 480, &[fixtures::track(events)]),
+    );
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Boundary lesson")
+        .unwrap();
+    let initial = library.load(&variant.id).unwrap();
+    assert!(library.transpose_notes(&original.id, 0, &[1], 1).is_err());
+    for (ids, delta) in [
+        (vec![0, 1], -1),
+        (vec![1, 2], 1),
+        (vec![0], -12),
+        (vec![2], 12),
+        (vec![1, 1], 1),
+        (vec![1, u32::MAX], 1),
+        (vec![], 1),
+    ] {
+        assert!(library
+            .transpose_notes(&variant.id, 0, &ids, delta)
+            .is_err());
+        assert_eq!(library.load(&variant.id).unwrap(), initial);
+        assert_eq!(
+            library
+                .variant_state(&variant.id)
+                .unwrap()
+                .unwrap()
+                .revision,
+            0
+        );
+    }
+    for delta in [0, -2, 2, -13, 13, i16::MIN, i16::MAX] {
+        assert!(library
+            .transpose_notes(&variant.id, 0, &[1], delta)
+            .is_err());
+    }
+    library.transpose_notes(&variant.id, 0, &[0], 12).unwrap();
+    library.transpose_notes(&variant.id, 1, &[0], -12).unwrap();
+    assert_eq!(stored_variant_json(&root, &variant.id).0, "{}");
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .shifted_count,
+        0
+    );
+    library.transpose_notes(&variant.id, 2, &[1], -1).unwrap();
+    library.remove_notes(&variant.id, 3, &[1]).unwrap();
+    let before = stored_variant_json(&root, &variant.id);
+    assert!(library.transpose_notes(&variant.id, 4, &[1], 1).is_err());
+    assert!(library.transpose_notes(&variant.id, 3, &[0], 1).is_err());
+    assert_eq!(stored_variant_json(&root, &variant.id), before);
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .shifted_count,
+        0
+    );
+    library.undo_notes(&variant.id, 4).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap().notes[1].pitch, 59);
+    library.transpose_notes(&variant.id, 5, &[1], 1).unwrap();
+    assert_eq!(stored_variant_json(&root, &variant.id).0, "{}");
+    library.undo_notes(&variant.id, 6).unwrap();
+    assert_eq!(library.load(&variant.id).unwrap().notes[1].pitch, 59);
+}
+
+#[test]
+fn schema_two_removal_history_upgrades_without_losing_undo_despite_wrong_version_flag() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("legacy lesson.mid", &sparse_note_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Old removal history")
+        .unwrap();
+    library.remove_notes(&variant.id, 0, &[0, 2]).unwrap();
+    let source_before = original_row(&root, &original.id);
+    drop(library);
+    // Isolated schema-2 fixture: old records had only Vec<Vec<u32>> history and
+    // no pitch column. The misleading user_version must not skip migration.
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    db.execute_batch("DROP TRIGGER protect_mixed_variant_history; DROP TRIGGER protect_mixed_variant_insert;
+        UPDATE variants SET undo_json='[[0,2]]'; ALTER TABLE variants DROP COLUMN pitch_json; PRAGMA user_version=3;").unwrap();
+    drop(db);
+    let mut library = Library::open(root.clone()).unwrap();
+    assert_eq!(
+        library.variant_state(&variant.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 1,
+            can_undo: true,
+            removed_count: 2,
+            shifted_count: 0
+        }
+    );
+    assert_eq!(stored_variant_json(&root, &variant.id).1, "[[0,2]]");
+    library.transpose_notes(&variant.id, 1, &[1], 1).unwrap();
+    let history: serde_json::Value =
+        serde_json::from_str(&stored_variant_json(&root, &variant.id).1).unwrap();
+    assert_eq!(history["version"], 1);
+    assert_eq!(history["operations"].as_array().unwrap().len(), 2);
+    library.undo_notes(&variant.id, 2).unwrap();
+    library.undo_notes(&variant.id, 3).unwrap();
+    assert_eq!(
+        library.load(&variant.id).unwrap(),
+        library.load(&original.id).unwrap()
+    );
+    assert_eq!(original_row(&root, &original.id), source_before);
+    drop(library);
+    // Simulate an older executable overwriting this informational version flag.
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    db.execute_batch("PRAGMA user_version=2;").unwrap();
+    drop(db);
+    let library = Library::open(root.clone()).unwrap();
+    assert_eq!(
+        library
+            .variant_state(&variant.id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        4
+    );
+    assert_eq!(stored_variant_json(&root, &variant.id).0, "{}");
+}
+
+#[test]
+fn pitched_clone_with_empty_history_restarts_and_old_editors_fail_closed() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let source = directory.write("copy source.mid", &sparse_note_fixture());
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let first = library
+        .create_variant(&original.id, "Pitch source")
+        .unwrap();
+    library.transpose_notes(&first.id, 0, &[1, 3], 12).unwrap();
+    library.remove_notes(&first.id, 1, &[0]).unwrap();
+    let copy = library
+        .create_variant(&first.id, "Independent pitched copy")
+        .unwrap();
+    let expected = library.load(&first.id).unwrap();
+    assert_eq!(copy.original_id, Some(original.id));
+    assert_eq!(
+        library.variant_state(&copy.id).unwrap().unwrap(),
+        model::LessonState {
+            revision: 0,
+            can_undo: false,
+            removed_count: 1,
+            shifted_count: 2
+        }
+    );
+    let stored = stored_variant_json(&root, &copy.id);
+    assert!(
+        serde_json::from_str::<Vec<Vec<u32>>>(&stored.1).is_err(),
+        "old variant loader must reject even an empty mixed history"
+    );
+    let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+    assert!(db.execute("UPDATE variants SET undo_json='[]',removed_json='[]',removed_count=0,revision=revision+1 WHERE 'variant-'||variant_id=?1",[&copy.id]).is_err());
+    assert_eq!(stored_variant_json(&root, &copy.id), stored);
+    drop(db);
+    drop(library);
+    let mut library = Library::open(root.clone()).unwrap();
+    assert_eq!(library.load(&copy.id).unwrap(), expected);
+    assert!(library.undo_notes(&copy.id, 0).is_err());
+    library.transpose_notes(&copy.id, 0, &[1, 3], -12).unwrap();
+    library.undo_notes(&copy.id, 1).unwrap();
+    assert_eq!(library.load(&copy.id).unwrap(), expected);
+    assert!(!library.variant_state(&copy.id).unwrap().unwrap().can_undo);
+    assert!(
+        serde_json::from_str::<Vec<Vec<u32>>>(&stored_variant_json(&root, &copy.id).1).is_err()
+    );
+    assert_eq!(library.load(&first.id).unwrap(), expected);
+}
+
+#[test]
+fn large_pitch_operations_keep_at_most_two_hundred_thousand_undo_note_changes() {
+    let directory = TestDirectory::new();
+    let root = directory.path().join("library");
+    let count = 20_001_u32;
+    let mut events = Vec::with_capacity(count as usize * 2 + 1);
+    for _ in 0..count {
+        events.push((0, vec![0x90, 60, 80]));
+        events.push((1, vec![0x80, 60, 0]));
+    }
+    events.push((0, vec![0xff, 0x2f, 0]));
+    let source = directory.write(
+        "bounded undo.mid",
+        &fixtures::smf(0, 480, &[fixtures::track(events)]),
+    );
+    let mut library = Library::open(root.clone()).unwrap();
+    let original = library.import_path(&source).unwrap().entry;
+    let variant = library
+        .create_variant(&original.id, "Bounded pitch history")
+        .unwrap();
+    let ids: Vec<_> = (0..count).collect();
+    for revision in 0..10 {
+        library
+            .transpose_notes(
+                &variant.id,
+                revision,
+                &ids,
+                if revision % 2 == 0 { 1 } else { -1 },
+            )
+            .unwrap();
+    }
+    let history: serde_json::Value =
+        serde_json::from_str(&stored_variant_json(&root, &variant.id).1).unwrap();
+    let operations = history["operations"].as_array().unwrap();
+    assert_eq!(operations.len(), 9);
+    assert_eq!(
+        operations
+            .iter()
+            .map(|op| op["previous"].as_array().unwrap().len())
+            .sum::<usize>(),
+        180_009
+    );
+    drop(library);
+    let mut library = Library::open(root).unwrap();
+    for revision in 10..19 {
+        library.undo_notes(&variant.id, revision).unwrap();
+    }
+    let state = library.variant_state(&variant.id).unwrap().unwrap();
+    assert!(!state.can_undo);
+    assert_eq!(state.shifted_count, count as usize);
+    assert!(library
+        .load(&variant.id)
+        .unwrap()
+        .notes
+        .iter()
+        .all(|note| note.pitch == 61));
+    assert!(library
+        .load(&original.id)
+        .unwrap()
+        .notes
+        .iter()
+        .all(|note| note.pitch == 60));
+}
+
+#[test]
+fn edited_export_reimports_and_plays_while_original_bytes_and_existing_files_stay_exact() {
+    for bytes in [fixtures::demo_midi(), fixtures::tempo_sustain()] {
+        let directory = TestDirectory::new();
+        let root = directory.path().join("library");
+        let source = directory.write("Downloads 日本語/original.mid", &bytes);
+        let mut library = Library::open(root.clone()).unwrap();
+        let original = library.import_path(&source).unwrap().entry;
+        let original_song = library.load(&original.id).unwrap();
+        let row_before = original_row(&root, &original.id);
+        let variant = library
+            .create_variant(&original.id, "Exported practice version")
+            .unwrap();
+        let moved_id = original_song.notes.first().unwrap().id;
+        let removed_id = original_song.notes.last().unwrap().id;
+        library
+            .transpose_notes(&variant.id, 0, &[moved_id], 12)
+            .unwrap();
+        library.remove_notes(&variant.id, 1, &[removed_id]).unwrap();
+        let edited = library.load(&variant.id).unwrap();
+        let state_before = library.variant_state(&variant.id).unwrap();
+        let edits_before = stored_variant_json(&root, &variant.id);
+        drop(library);
+
+        let mut library = Library::open(root.clone()).unwrap();
+        let exported = directory.path().join("practice version 日本語.mid");
+        library.export(&variant.id, &exported).unwrap();
+        assert_ne!(fs::read(&exported).unwrap(), bytes);
+        let imported = library.import_path(&exported).unwrap();
+        assert!(!imported.duplicate);
+        assert_ne!(imported.entry.id, original.id);
+        assert_eq!(imported.entry.original_id, None);
+        assert!(library.variant_state(&imported.entry.id).unwrap().is_none());
+        let reloaded = library.load(&imported.entry.id).unwrap();
+        // MIDI has no Keyloom stable IDs. Reimport assigns new dense IDs, but
+        // every retained note and all canonical timing/controllers must match.
+        let mut expected = edited.clone();
+        assert_eq!(expected.notes.len(), reloaded.notes.len());
+        for (expected, actual) in expected.notes.iter_mut().zip(&reloaded.notes) {
+            expected.id = actual.id;
+        }
+        assert_eq!(reloaded, expected);
+        let mut engine = transport::Engine::new();
+        engine.load(reloaded, library.settings(&imported.entry.id).unwrap());
+        engine.play();
+        assert!(engine.advance(100.0).iter().any(|event| matches!(
+            event,
+            transport::VoiceEvent::On { pitch, .. } if *pitch == edited.notes[0].pitch
+        )));
+
+        let existing = directory.write("existing destination.mid", b"keep this external file");
+        assert!(library.export(&variant.id, &existing).is_err());
+        assert_eq!(fs::read(&existing).unwrap(), b"keep this external file");
+        assert!(library.export(&variant.id, &source).is_err());
+        assert_eq!(fs::read(&source).unwrap(), bytes);
+        let original_export = directory.path().join("exact original export.mid");
+        library.export(&original.id, &original_export).unwrap();
+        assert_eq!(fs::read(original_export).unwrap(), bytes);
+        assert_eq!(
+            fs::read(root.join("midi").join(format!("{}.mid", original.id))).unwrap(),
+            bytes
+        );
+        assert_eq!(library.load(&original.id).unwrap(), original_song);
+        assert_eq!(original_row(&root, &original.id), row_before);
+        assert_eq!(library.variant_state(&variant.id).unwrap(), state_before);
+        assert_eq!(stored_variant_json(&root, &variant.id), edits_before);
+    }
 }

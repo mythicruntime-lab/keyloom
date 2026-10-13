@@ -1,6 +1,18 @@
 # Keyloom handoff
 
-## Current release — 0.2.0, 12 October 2026
+## Current release — 0.3.0, 12 October 2026
+
+The approved follow-up adds selected-note semitone/octave moves, persistent mixed pitch/removal Undo, and edited MIDI export to a new file. Originals remain unchanged. Each pitch batch is atomic within MIDI 0–127; selection stays active for repeated moves. Undo retains up to 100 actions/200,000 note changes. Copies inherit current edits with fresh history. Schema-2 versions migrate additively, with older-editor protection for new mixed histories.
+
+Export keeps original tempo, ticks, tracks and non-note events, applying saved removals/pitches. It ignores practice speed, roles, split and loops. Original export remains byte-exact. Existing destinations, empty versions, exceeded limits and ambiguous same-pitch release pairings are refused. Pressure is preserved without retargeting; SysEx is retained in files but never sent to hardware. Timing/duration edits, chord thinning, recording and M5–M6 remain deferred.
+
+Validation: 134 Rust executions (90 distinct cases; one optional benchmark ignored), strict Clippy, formatting, TypeScript, and Windows release build pass. Generated and owner-selected easy MIDI each pass 11 real native exercise checks plus three restart checks, including edit→export→immediate reimport→play, exact notes/timing, mixed Undo/restart, USB port/output, cleanup and PC mute. Native input simulations do not establish physical playing or LED observations. The previous physical guide/mute acceptance remains valid; moved/removed-target and exported-song hardware checks are still pending.
+
+The closed normal library was backed up to ignored `test-output/pre-030-user-library`. Schema-3 upgrade verification preserved all five original rows, both existing practice-version rows, all five MIDI hashes and preferences exactly. Native visual QA then shifted one project-authored demo note and undid it, leaving zero shifted/removed demo notes; the demo revision/history format and last-played metadata advanced normally. The owner's private version was not edited. The real Save dialog and cancellation were checked; its generated demo export is retained only in ignored `test-output/manual-030-export.mid`. See `docs/test-report.md` and `docs/screenshots/pitch-editor-native.jpg`.
+
+The tested executable SHA-256 is `6a91ace00b7e3311a22b692d6e5b9318a18ce3dfafb2b36e3844a226b499ae0c`. Installer and portable ZIP are built; all 580 portable files match their ZIP entries, all 562 license files match the source inventory, and release checksums validate. No dependency versions changed; the local license audit refreshed app-version/lockfile records. Existing public-release provenance/copyright questions remain below. Packages and the scoped release commit are local only; no push is authorized.
+
+## Previous release — 0.2.0, 12 October 2026
 
 The owner-approved first M4 slice is implemented: named practice versions, Canvas/list selection and note removal, persistent Undo for the last 100 removals, original/version switching and keyboard-range warnings. Original MIDI bytes/canonical data stay unchanged; edits live separately with independent settings and revisions. Playback pauses for editing; simulated UI notes cannot score or play during editing. Saving a copy of a version starts from its current notes with fresh Undo history. Originals with dependent versions cannot be removed. Automatic simplification, pitch/time/duration editing, edited MIDI export, recording and M5–M6 remain outside this approval.
 
@@ -16,7 +28,7 @@ The owner clarified that Light Guide should mute Keyloom's PC tone while they li
 
 ## Delivered state
 
-M0–M3 and the approved first M4 slice are implemented and software-verified. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. The remaining M4 roadmap, M5–M6 and external services are deferred. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.
+M0–M3 and the approved practice-version/removal slice are implemented and software-verified. The pitch/export follow-up is recorded above. The app uses the proposed Tauri 2/Rust/React/TypeScript/Canvas architecture with native WinMM input and WASAPI basic-tone output. The remaining M4 roadmap, M5–M6 and external services are deferred. No publishing/pushing, unrelated-project edits, agent-process interference, driver/overlay changes, scheduled tasks or services occurred.
 
 The owner's chosen easy MIDI is Ready in the normal managed library, with 2,171 notes in one combined part. It passed the actual installed import-to-library-to-play workflow without restart. The source remains private and untouched; it is not in Git or any release resource. The original generated First threads exercise is also available, and the owner has since added more songs.
 
@@ -26,15 +38,15 @@ The 0.1.1 display update gives the strike line a fixed bright pink band, pale sh
 
 ## Run and build
 
-- Run `artifacts/Keyloom-0.2.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.2.0_x64-setup.exe`.
-- Portable ZIP: `artifacts/Keyloom-0.2.0-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
+- Run `artifacts/Keyloom-0.3.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.3.0_x64-setup.exe`.
+- Portable ZIP: `artifacts/Keyloom-0.3.0-windows-x64.zip`; hashes: `artifacts/SHA256SUMS.txt`.
 - From this checkout: `powershell -File scripts/Launch.ps1`.
 - Restore/build: `powershell -File scripts/Build.ps1 -Mode restore`, then `powershell -File scripts/Build.ps1 -Mode package -Jobs 2`.
 - Built apps need Windows x64 and installed WebView2; no development tools, Python, network, account or administrator access. These builds are unsigned.
 
 Open Keyboard & sound, select USB MIDI Interface, and choose Yamaha speakers or PC basic tone. Calibrate the actual keyboard endpoints. For Light Guide, connect adapter OUT → Yamaha IN, enable the Yamaha's OVERALL o1 setting, connect the MIDI output and enable Light Guide. Open a song, choose Wait for me, then Play. Its combined part can use the explicitly approximate split for one-hand practice. Output is limited to guide notes; MIDI Thru and imported SysEx are never sent.
 
-Open a song → **Save practice version** → **Create practice version** → **Edit notes**. Select notes on the roll or list, remove them, then **Done editing** to play. Use **Undo removal** or **Lesson version** to compare with the untouched original.
+Open a song → **Save practice version** → **Create practice version** → **Edit notes**. Select notes on the roll or list, move them with **Semitone down/up** or **Octave down/up**, or remove them. **Undo edit** reverses moves and removals, including after restart. Choose **Done editing** to play; **Lesson version** compares with the untouched original. **Export MIDI** writes all saved notes at original tempo to a new file, ignoring practice speed/roles/loops.
 
 Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; remove deletes only the confirmed managed copy or practice-version record. Uninstall retains data unless the interactive delete-data checkbox is selected. Keep this directory when updating/backing up. Normal app shutdown ends all its workers.
 
@@ -56,8 +68,8 @@ Data lives under `%LOCALAPPDATA%\app.keyloom.desktop`. Import copies sources; re
 
 Basic physical Wait for me, reconnect and Light Guide PC mute/unmute are owner-reported passes. Detailed repeated-note/chord/velocity edge cases, long-session sound/dropouts, actual range, 4K scaling and end-to-end latency still need confirmation. Physical pedal testing is not applicable to the owner's setup. Follow `docs/hardware-checklist.md`; port opening and simulated targets do not independently prove physical playing.
 
-Sound is a labeled basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity, general playback MIDI output, pitch/time/duration editing, edited MIDI export, MusicXML/OMR, transcription, downloading, cloud/accounts and LLM features are deferred. Guide output may sound the Yamaha as well as light keys; no independent silent-LED protocol is claimed. Listen sends no guide notes. Physically confirming removed targets on a practice version, long sessions, cable-loss recovery with lit notes, Timed guidance and failed-driver cleanup remain additional hardware checks. Type 2/SMPTE MIDI is explicitly unsupported. If the Windows audio output changes/fails, restart Keyloom to reopen it. No other-platform claim is made.
+Sound is a labeled basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity, general playback MIDI output, time/duration editing, automatic chord thinning, MusicXML/OMR, transcription, downloading, cloud/accounts and LLM features are deferred. Guide output may sound the Yamaha as well as light keys; no independent silent-LED protocol is claimed. Listen sends no guide notes. Physically confirming moved/removed targets and reimported edited MIDI on a practice version, long sessions, cable-loss recovery with lit notes, Timed guidance and failed-driver cleanup remain additional hardware checks. Type 2/SMPTE MIDI is explicitly unsupported. If the Windows audio output changes/fails, restart Keyloom to reopen it. No other-platform claim is made.
 
 Before any public release, confirm copyright-holder wording in LICENSE and review the remaining exact-binary provenance of Tauri's prebuilt installer helper and Microsoft static CRT redistribution rights in `docs/dependencies.md`. MPL source/notice obligations are handled by the shipped unmodified source archives; all dependency terms remain separate from project MIT. Optional upstream taskbar-unpin code was omitted; manually unpin retained taskbar pins after uninstall.
 
-Use normal Windows permissions for temp-directory tests on this machine. Build scripts shorten PATH only in their own process and default to two workers. Switchwall tools were unavailable in this session. No automated background follow-up was installed.
+Use normal Windows permissions for temp-directory tests on this machine. Build scripts shorten PATH only in their own process and default to two workers. Switchwall is available in inbox mode. An external Claude review request was rejected by automatic approval review because transmitting project source to that endpoint was not explicitly authorized; it was not retried or bypassed. Local inspection and tests continue to establish release evidence. No automated background follow-up was installed.

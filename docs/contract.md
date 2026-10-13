@@ -2,6 +2,14 @@
 
 All JSON uses snake_case. Musical times are milliseconds as f64 at original tempo. Transport speed scales wall time, never pitches. IDs are stable within a parsed file; library IDs are SHA-256 of exact source bytes.
 
+## Practice versions and export (0.3.0)
+
+`LibraryEntry` also includes `original_id:Option<String>` (missing means an original). Version IDs are `variant-<number>` and point directly to a root original. `OpenSong { entry,song,settings,lesson:Option<LessonState> }`; `LessonState { revision:u64,can_undo:bool,removed_count:usize,shifted_count:usize }`, with missing shifted count defaulting to zero.
+
+IPC `create_variant { id,title }`, `remove_notes { id,expected_revision,note_ids }`, `transpose_notes { id,expected_revision,note_ids,semitones }` and `undo_notes { id,expected_revision }` return the reloaded `OpenSong`, paused. `lesson_versions { id }` returns the root and its versions. Transpose accepts only −12, −1, +1, +12; invalid batches are rejected atomically. Undo handles removals and pitches in reverse saved order.
+
+`export_song { id } -> string|null` returns the new destination path, or null after dialog cancellation. Originals export exact bytes; versions export verified edited MIDI. Neither path overwrites a file. `exporter::edited_midi(original_bytes:&[u8],edited:&Song)->Result<Vec<u8>,String>` is byte-only and performs no file or device I/O. It checks the reparsed musical result before the library creates any destination. Practice speed/roles/loops are not exported.
+
 `model.rs`: serde Serialize/Deserialize models. `Song { ppq: u16, duration_ms: f64, notes: Vec<Note>, parts: Vec<Part>, tempos: Vec<Tempo>, time_signatures: Vec<TimeSignature>, controllers: Vec<Controller>, warnings: Vec<String> }`. `Note { id:u32, part_id:u32, channel:u8, pitch:u8, velocity:u8, start_tick:u64, end_tick:u64, start_ms:f64, end_ms:f64 }`. `Part { id:u32, track:u32, channel:u8, name:String, note_count:usize, percussion:bool }`. `Tempo { tick:u64, micros_per_quarter:u32, time_ms:f64 }`. `TimeSignature { tick:u64, numerator:u8, denominator:u16 }`. `Controller { part_id:u32, channel:u8, tick:u64, time_ms:f64, controller:u8, value:u8 }`.
 
 `SongSettings { speed:f64, mode:String, parts:Vec<PartSetting>, loop_start_ms:Option<f64>, loop_end_ms:Option<f64>, position_ms:f64, split_pitch:Option<u8>, split_hand:String (both|left|right, default both), count_in:bool, metronome:bool }` with Default. `PartSetting { part_id:u32, role:String, hand:String, volume:f32, solo:bool }` with role practice/accompaniment/muted; hand left/right/auto. Missing part settings mean practice unless percussion (accompaniment).

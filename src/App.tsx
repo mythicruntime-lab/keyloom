@@ -16,6 +16,7 @@ import {
   MidiEvent,
   OpenSong,
   PartSetting,
+  PitchShift,
   Preferences,
   SongSettings,
   noteName,
@@ -113,6 +114,11 @@ export default function App() {
   const [versions, setVersions] = useState<LibraryEntry[]>([]);
   const [editing, setEditing] = useState(false);
   const [lessonBusy, setLessonBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<{
+    id: string;
+    path: string;
+  } | null>(null);
   const [openingSong, setOpeningSong] = useState(false);
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
   const [variantDraft, setVariantDraft] = useState<{
@@ -195,7 +201,14 @@ export default function App() {
   }, [!!metadata, !!removing, !!variantDraft]);
   useEffect(() => {
     setSelectedNotes(new Set());
-  }, [current?.entry.id, current?.lesson?.revision]);
+  }, [current?.entry.id]);
+  useEffect(() => {
+    const ids = new Set(current?.song.notes.map((note) => note.id) ?? []);
+    setSelectedNotes((previous) => {
+      const next = new Set([...previous].filter((id) => ids.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [current?.song]);
   useEffect(() => {
     const id = current?.entry.id;
     if (!native || !id) {
@@ -687,7 +700,10 @@ export default function App() {
       setLessonBusy(false);
     }
   };
-  const updateLesson = async (action: "remove_notes" | "undo_notes") => {
+  const updateLesson = async (
+    action: "remove_notes" | "undo_notes" | "transpose_notes",
+    semitones?: PitchShift,
+  ) => {
     const active = latest.current.current;
     if (
       !active?.entry.original_id ||
@@ -697,7 +713,17 @@ export default function App() {
       !latest.current.editing
     )
       return;
-    if (action === "remove_notes" && !selectedNotes.size) return;
+    if (action !== "undo_notes" && !selectedNotes.size) return;
+    if (
+      action === "transpose_notes" &&
+      (semitones === undefined ||
+        active.song.notes.some(
+          (note) =>
+            selectedNotes.has(note.id) &&
+            (note.pitch + semitones < 0 || note.pitch + semitones > 127),
+        ))
+    )
+      return;
     lessonBusyRef.current = true;
     setLessonBusy(true);
     const generation = openGeneration.current;
@@ -706,7 +732,8 @@ export default function App() {
       const result = await invoke<OpenSong>(action, {
         id: active.entry.id,
         expected_revision: active.lesson.revision,
-        ...(action === "remove_notes" ? { note_ids: [...selectedNotes] } : {}),
+        ...(action !== "undo_notes" ? { note_ids: [...selectedNotes] } : {}),
+        ...(action === "transpose_notes" ? { semitones } : {}),
       });
       if (
         openGeneration.current === generation &&
@@ -714,7 +741,7 @@ export default function App() {
       ) {
         latest.current.current = result;
         setCurrent(result);
-        setSelectedNotes(new Set());
+        if (action !== "transpose_notes") setSelectedNotes(new Set());
         setSeekValue(null);
         refreshStatusSoon.current();
       }
@@ -800,6 +827,44 @@ export default function App() {
       return next;
     });
   };
+  const exportSong = async (entry: LibraryEntry) => {
+    if (!native || lessonBusyRef.current || openingSongRef.current) return;
+    const generation = openGeneration.current;
+    const activeId = latest.current.current?.entry.id;
+    lessonBusyRef.current = true;
+    setLessonBusy(true);
+    setExporting(true);
+    setExportResult(null);
+    setNotice("");
+    setError("");
+    try {
+      await flushSettings();
+      if (
+        generation !== openGeneration.current ||
+        latest.current.current?.entry.id !== activeId
+      )
+        return;
+      const path = await invoke<string | null>("export_song", { id: entry.id });
+      if (
+        path &&
+        generation === openGeneration.current &&
+        latest.current.current?.entry.id === activeId
+      ) {
+        setExportResult({ id: entry.id, path });
+        setNotice(`MIDI exported to ${path}`);
+      }
+    } catch (reason) {
+      if (
+        generation === openGeneration.current &&
+        latest.current.current?.entry.id === activeId
+      )
+        report(reason);
+    } finally {
+      lessonBusyRef.current = false;
+      setLessonBusy(false);
+      setExporting(false);
+    }
+  };
   const inputNote = useCallback(
     (pitch: number, on: boolean) => {
       if (!native || !latest.current.preferences.simulated) return;
@@ -874,6 +939,7 @@ export default function App() {
   }, [inputNote, report]);
 
   const saveMetadata = async (entry: LibraryEntry) => {
+    if (lessonBusyRef.current) return;
     try {
       await invoke("save_metadata", { entry });
       if (current?.entry.id === entry.id)
@@ -885,7 +951,7 @@ export default function App() {
     }
   };
   const removeSong = async () => {
-    if (!removing) return;
+    if (!removing || lessonBusyRef.current) return;
     try {
       await flushSettings();
       await invoke("remove_song", { id: removing.id, confirmed: true });
@@ -1587,11 +1653,13 @@ export default function App() {
                 <span className="lesson-version-detail">
                   {openingSong
                     ? "Opening version…"
-                    : lessonBusy
-                      ? "Saving changes…"
-                      : current.entry.original_id
-                        ? `${current.lesson?.removed_count ?? 0} notes removed · original preserved`
-                        : "Original MIDI · unchanged"}
+                    : exporting
+                      ? "Exporting MIDI…"
+                      : lessonBusy
+                        ? "Saving changes…"
+                        : current.entry.original_id
+                          ? `${current.lesson?.removed_count ?? 0} removed · ${current.lesson?.shifted_count ?? 0} shifted · original preserved`
+                          : "Original MIDI · unchanged"}
                 </span>
                 <div className="button-row">
                   <button
@@ -1610,6 +1678,16 @@ export default function App() {
                   </button>
                   {current.entry.original_id && (
                     <button
+                      className="small-button"
+                      disabled={lessonBusy || openingSong}
+                      onClick={() => void exportSong(current.entry)}
+                      aria-describedby="practice-export-help"
+                    >
+                      Export MIDI
+                    </button>
+                  )}
+                  {current.entry.original_id && (
+                    <button
                       className={`small-button ${editing ? "selected" : ""}`}
                       disabled={
                         lessonBusy || openingSong || editing || !current.lesson
@@ -1621,6 +1699,13 @@ export default function App() {
                   )}
                 </div>
               </div>
+              {current.entry.original_id && (
+                <p className="lesson-export-note" id="practice-export-help">
+                  Export includes all saved notes at original tempo. Practice
+                  speed, part roles, hand split, and loops do not change the
+                  file.
+                </p>
+              )}
               <fieldset
                 className="practice-options"
                 disabled={editing || lessonBusy || openingSong}
@@ -1776,6 +1861,9 @@ export default function App() {
                     onClear={() => setSelectedNotes(new Set())}
                     onSeek={(ms) => void control("seek", ms)}
                     onRemove={() => void updateLesson("remove_notes")}
+                    onTranspose={(semitones) =>
+                      void updateLesson("transpose_notes", semitones)
+                    }
                     onUndo={() => void updateLesson("undo_notes")}
                     onDone={() => {
                       setEditing(false);
@@ -2669,18 +2757,25 @@ export default function App() {
         </div>
       )}
       {metadata && (
-        <div className="modal-backdrop" onClick={() => setMetadata(null)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!lessonBusyRef.current) setMetadata(null);
+          }}
+        >
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="metadata-title"
             className="modal"
+            aria-busy={lessonBusy}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="card-title">
               <h2 id="metadata-title">Arrangement details</h2>
               <button
                 className="icon-button"
+                disabled={lessonBusy}
                 onClick={() => setMetadata(null)}
                 aria-label="Close details"
               >
@@ -2706,6 +2801,7 @@ export default function App() {
                       value={metadata[field]}
                       maxLength={field === "tags" ? 2000 : 500}
                       required={field === "title"}
+                      disabled={lessonBusy}
                       onChange={(event) =>
                         setMetadata({
                           ...metadata,
@@ -2724,6 +2820,7 @@ export default function App() {
               <label className="check">
                 <input
                   type="checkbox"
+                  disabled={lessonBusy}
                   checked={metadata.favorite}
                   onChange={(event) =>
                     setMetadata({ ...metadata, favorite: event.target.checked })
@@ -2731,29 +2828,39 @@ export default function App() {
                 />
                 Favorite this arrangement
               </label>
-              {metadata.original_id && (
-                <p className="help-text">
-                  MIDI export for practice versions is not available yet. Switch
-                  to the original to export the unchanged MIDI.
+              <p className="help-text" id="metadata-export-help">
+                Export includes all saved notes at original tempo. Practice
+                speed, part roles, hand split, and loops do not change the file.
+              </p>
+              {exporting && (
+                <p className="help-text" role="status">
+                  Exporting MIDI…
+                </p>
+              )}
+              {exportResult?.id === metadata.id && (
+                <p className="help-text export-result" role="status">
+                  MIDI exported to {exportResult.path}
+                </p>
+              )}
+              {error && (
+                <p className="inline-warning" role="alert">
+                  {error}
                 </p>
               )}
               <div className="modal-actions">
-                {!metadata.original_id && (
-                  <button
-                    type="button"
-                    className="small-button"
-                    onClick={() => {
-                      void invoke("export_song", { id: metadata.id }).catch(
-                        report,
-                      );
-                    }}
-                  >
-                    Export MIDI
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="small-button"
+                  disabled={lessonBusy || openingSong}
+                  aria-describedby="metadata-export-help"
+                  onClick={() => void exportSong(metadata)}
+                >
+                  Export MIDI
+                </button>
                 <button
                   type="button"
                   className="text-danger"
+                  disabled={lessonBusy}
                   onClick={() => {
                     setRemoving(metadata);
                     setMetadata(null);
@@ -2761,7 +2868,11 @@ export default function App() {
                 >
                   Remove
                 </button>
-                <button type="submit" className="button primary">
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={lessonBusy}
+                >
                   Save details
                 </button>
               </div>
@@ -2784,10 +2895,8 @@ export default function App() {
             </h2>
             <p>
               “{removing.title}” and its saved practice settings
-              {removing.original_id
-                ? ", including its note removals,"
-                : ""}{" "}
-              will be removed from Keyloom’s library.
+              {removing.original_id ? ", including its note edits," : ""} will
+              be removed from Keyloom’s library.
             </p>
             <p>
               {removing.original_id

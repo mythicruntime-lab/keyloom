@@ -2,6 +2,14 @@
 
 User-visible changes to Keyloom are recorded here. Version dates refer to local releases; no public release is implied.
 
+## 0.3.0 — 2026-10-12
+
+- Added selected-note moves by one semitone or one octave in either direction. Repeated moves retain selection; moves crossing MIDI 0–127 are refused as a whole, while keyboard-range warnings remain advisory.
+- Extended saved Undo to mixed pitch/removal edits, bounded to 100 actions and 200,000 individual note-change entries. Existing originals and 0.2.0 practice versions are retained; copied versions inherit current edits with fresh Undo history.
+- Added edited MIDI export from the practice toolbar and arrangement details. Export creates a new file, keeps source tempo/timing and non-note events, and ignores practice speed, roles, hand split and loops. Original export remains byte-exact.
+- Refuse empty or musically ambiguous edited exports instead of changing note timing. Expressive pressure is preserved without retargeting it to moved pitches; source SysEx is preserved in files but never sent to hardware by Keyloom.
+- Timing/duration editing, automatic chord thinning and M5–M6 remain deferred. Release validation and remaining physical checks are recorded separately in the test report and hardware checklist.
+
 ## 0.2.0 — 2026-10-12
 
 - Added named practice versions that preserve the imported original and keep independent practice settings.

@@ -35,6 +35,7 @@ struct SmokeConfig {
     expected_count: usize,
     device_id: Option<String>,
     output_device_id: Option<String>,
+    export_path: String,
 }
 #[derive(Serialize)]
 pub struct ImportOutcome {
@@ -288,6 +289,27 @@ async fn undo_notes(
     })
     .await
 }
+#[tauri::command(rename_all = "snake_case")]
+async fn transpose_notes(
+    id: String,
+    expected_revision: u64,
+    note_ids: Vec<u32>,
+    semitones: i16,
+    state: tauri::State<'_, AppState>,
+) -> Result<OpenSong, String> {
+    let lib = state.library.clone();
+    let runtime = state.runtime.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        runtime.send(Command::Pause)?;
+        persist_session(&lib, &runtime)?;
+        let mut library = lib.lock().map_err(lock_error)?;
+        library.transpose_notes(&id, expected_revision, &note_ids, semitones)?;
+        load_session(&mut library, &runtime, &id).map_err(saved_version_error)
+    })
+    .await
+}
 fn saved_version_error(reason: String) -> String {
     format!("The practice version was saved, but could not reopen for playback: {reason} Open it again from the Library.")
 }
@@ -351,27 +373,55 @@ async fn remove_song(
     .await
 }
 #[tauri::command(rename_all = "snake_case")]
-async fn export_song(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn export_song(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
     let lib = state.library.clone();
+    // Test mode changes only destination selection; the real UI export action,
+    // serializer and create-new write path are shared with ordinary exports.
+    let test_path = state
+        .smoke
+        .as_ref()
+        .map(|smoke| PathBuf::from(&smoke.export_path));
     blocking(move || {
         let entry = lib.lock().map_err(lock_error)?.entry(&id)?;
-        if entry.original_id.is_some() {
-            return Err("Edited MIDI export is not available yet. Open the original to export its unchanged MIDI.".into());
-        }
-        let title = entry.title;
-        let filename: String = title
+        let edited = entry.original_id.is_some();
+        let filename: String = entry
+            .title
             .chars()
             .filter(|c| !"<>:\"/\\|?*".contains(*c) && !c.is_control())
+            .take(120)
             .collect();
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Export original MIDI")
-            .add_filter("MIDI", &["mid"])
-            .set_file_name(format!("{filename}.mid"))
-            .save_file()
-        {
+        let filename = filename.trim().trim_end_matches([' ', '.']);
+        let filename = if filename.is_empty() {
+            "Keyloom export"
+        } else {
+            filename
+        };
+        let path = if let Some(path) = test_path {
+            std::fs::create_dir_all(path.parent().ok_or("Missing test export directory")?)
+                .map_err(|error| error.to_string())?;
+            Some(path)
+        } else {
+            rfd::FileDialog::new()
+                .set_title(if edited {
+                    "Export practice version MIDI"
+                } else {
+                    "Export original MIDI"
+                })
+                .add_filter("MIDI", &["mid"])
+                .set_file_name(format!(
+                    "{filename}{}.mid",
+                    if edited { " - edited" } else { "" }
+                ))
+                .save_file()
+        };
+        if let Some(path) = path {
             lib.lock().map_err(lock_error)?.export(&id, &path)?;
+            return Ok(Some(path.to_string_lossy().into_owned()));
         }
-        Ok(())
+        Ok(None)
     })
     .await
 }
@@ -646,12 +696,12 @@ pub fn run() {
     })).setup(move |app|{
         let args:Vec<String>=std::env::args().collect();let smoke_root=args.iter().position(|a|a=="--smoke-test").and_then(|i|args.get(i+1)).map(PathBuf::from);
         let root=smoke_root.clone().unwrap_or(app.path().app_local_data_dir()?);std::fs::create_dir_all(&root)?;let library=Library::open(root.clone()).map_err(std::io::Error::other)?;
-        let smoke=if smoke_root.is_some(){let directory=root.join("inputs with spaces 日本語");std::fs::create_dir_all(&directory)?;let first=directory.join("First threads.mid");let second=directory.join("Tempo and pedal.midi");let corrupt=directory.join("Broken.mid");if !args.iter().any(|a|a=="--smoke-restart"){std::fs::write(&first,fixtures::demo_midi())?;std::fs::write(&second,fixtures::tempo_sustain())?;std::fs::write(&corrupt,b"invalid MIDI")?;}let first=args.iter().position(|a|a=="--smoke-midi").and_then(|i|args.get(i+1)).map(PathBuf::from).unwrap_or(first);Some(SmokeConfig{phase:if args.iter().any(|a|a=="--smoke-restart"){"restart"}else{"exercise"}.into(),paths:[first,second,corrupt].iter().map(|p|p.to_string_lossy().into_owned()).collect(),expected_count:2,device_id:args.iter().position(|a|a=="--smoke-device").and_then(|i|args.get(i+1)).cloned(),output_device_id:args.iter().position(|a|a=="--smoke-output").and_then(|i|args.get(i+1)).cloned()})}else{None};
+        let smoke=if smoke_root.is_some(){let directory=root.join("inputs with spaces 日本語");std::fs::create_dir_all(&directory)?;let first=directory.join("First threads.mid");let second=directory.join("Tempo and pedal.midi");let corrupt=directory.join("Broken.mid");if !args.iter().any(|a|a=="--smoke-restart"){std::fs::write(&first,fixtures::demo_midi())?;std::fs::write(&second,fixtures::tempo_sustain())?;std::fs::write(&corrupt,b"invalid MIDI")?;}let first=args.iter().position(|a|a=="--smoke-midi").and_then(|i|args.get(i+1)).map(PathBuf::from).unwrap_or(first);Some(SmokeConfig{phase:if args.iter().any(|a|a=="--smoke-restart"){"restart"}else{"exercise"}.into(),paths:[first,second,corrupt].iter().map(|p|p.to_string_lossy().into_owned()).collect(),expected_count:2,export_path:root.join("exported").join("Keyloom edited export.mid").to_string_lossy().into_owned(),device_id:args.iter().position(|a|a=="--smoke-device").and_then(|i|args.get(i+1)).cloned(),output_device_id:args.iter().position(|a|a=="--smoke-output").and_then(|i|args.get(i+1)).cloned()})}else{None};
         let preferences=read_preferences(&root);let runtime=Runtime::start(preferences.clone());let pending=if smoke.is_some(){Vec::new()}else{file_args(std::env::args().skip(1),&std::env::current_dir()?)};
         app.manage(AppState{library:Arc::new(Mutex::new(library)),runtime,preferences:Arc::new(Mutex::new(preferences)),root,pending:Mutex::new(pending),importing:Arc::new(AtomicBool::new(false)),operations:Arc::new(Mutex::new(())),smoke,started,launch_to_ui_us:AtomicU64::new(0)});
         let handle=app.handle().clone();std::thread::Builder::new().name("keyloom-save".into()).spawn(move||loop{std::thread::sleep(Duration::from_secs(5));if let Some(state)=handle.try_state::<AppState>(){if persist(&state).is_err(){/* Kept out of timing path; exit retries persistence. */}}else{break;}})?;
         Ok(())
-    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
+    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,transpose_notes,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
     let application = builder
         .build(tauri::generate_context!())
         .expect("Keyloom could not initialize its local application data or WebView2 window");

@@ -88,7 +88,9 @@ export interface LessonState {
   revision: number;
   can_undo: boolean;
   removed_count: number;
+  shifted_count: number;
 }
+export type PitchShift = -12 | -1 | 1 | 12;
 export interface OpenSong {
   entry: LibraryEntry;
   song: Song;

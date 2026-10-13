@@ -1,5 +1,15 @@
 # Yamaha verification
 
+## Pitch editing and MIDI export — 0.3.0, pending
+
+No new physical-keyboard or release-test pass is claimed here for 0.3.0. Record automated release results in the test report separately from these hardware observations.
+
+- Make a practice version, select a familiar target and move it by a semitone, then an octave. After **Done editing**, confirm the roll, required physical key and Light Guide all follow the edited pitch. Confirm entering the editor clears sounding/guide notes.
+- Remove a different note, then use **Undo edit** through both the removal and pitch moves. Restart partway through the sequence and confirm Undo still restores the expected targets. Switch to the original and verify its pitches are unchanged.
+- Deliberately move a note outside the configured keyboard range. Confirm a warning appears and Light Guide does not light that unavailable key; the saved note remains selectable for correction. This warning must not transpose the note automatically.
+- Export the saved version to a new filename, reimport it and practice it on the Yamaha. Check retained pitches, durations and tempo by playing/listening. Practice speed, roles, split and loops must not alter the exported arrangement. Keep source pressure/bend/program behavior in mind for expressive files; the basic tone is not a full General MIDI renderer.
+- Repeat Pause, Stop, Panic, version switching and exit with edited targets lit. These checks supplement the previously confirmed original-song behavior below; successful native send calls alone do not prove optical cleanup.
+
 ## Practice versions — 0.2.0
 
 Automated native tests verify edited-song playback, original preservation, Undo/restart and simulated-input isolation. No new physical playing result is claimed for edited versions. On a saved practice version, remove a target with Edit notes, finish editing and play with Light Guide: confirm the removed note is neither lit nor required. Switch to the original and confirm the target returns. Pause, version switching and edit entry should clear lights. These extend, rather than replace, the owner's prior 0.1.2/0.1.3 checks below.
@@ -29,10 +39,10 @@ Additional hardware checks: Timed mode and selected-hand guidance across longer 
 Native port enumeration, two open/close/reopen cycles of USB MIDI Interface, and WASAPI callback operation passed in the installed and portable builds. Simulated keys and callback samples are not physical-keyboard or audible-latency evidence.
 
 - Connect the Yamaha MIDI OUT to the adapter MIDI IN. In Keyloom select the observed USB interface explicitly; confirm the live monitor labels events **physical**, with expected channel, note, velocity and note-off. Test velocity-zero note-on release. Physical pedal CC64 is not applicable unless a pedal is added later.
-- Calibrate the real lowest/highest keys. Confirm out-of-range targets are reported without transposition. Confirm C4 note 60/note-number labels agree with the keyboard convention you prefer.
+- Calibrate the real lowest/highest keys. Confirm out-of-range targets are reported without automatic transposition. Confirm C4 note 60/note-number labels agree with the keyboard convention you prefer.
 - Use an imported arrangement. Start with Yamaha-speaker monitoring, then optionally PC basic-tone monitoring with keyboard local sound disabled manually to avoid doubling. Confirm sound, releases, chords and Panic by listening.
 - Wait mode: single notes, repeated notes (release/re-press), two-note chord within 150 ms, wrong extra notes, held chord transition. Confirm accompaniment and falling notes freeze together. Try left/right part practice and the explicitly approximate split for the combined track.
-- Timed/Listen: speed 25/75/150%, seek across sustained notes, pause/resume, count-in/metronome, A–B loop, and stop. Confirm no stuck notes or pitch changes.
+- Timed/Listen: speed 25/75/150%, seek across sustained notes, pause/resume, count-in/metronome, A–B loop, and stop. Confirm no stuck notes or unintended pitch changes.
 - Unplug during practice. Within the polling interval the session should pause and report loss. Refresh, reconnect the same interface, and resume. Try restart with the interface absent and with duplicate port names if available.
 - Resize, fullscreen, and the owner's 4K display/scaling. Check readability and actual playing responsiveness while the machine has its usual workload. No overlay/driver settings were changed; report any reproducible overlay conflict rather than attributing immunity to the new stack.
 - Measure true key-to-sound latency externally if needed. Internal timestamps/RAF cadence exclude USB, driver and speaker latency. Listen for dropouts during a longer session.
