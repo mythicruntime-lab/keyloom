@@ -1,7 +1,8 @@
 # Check out project text with LF everywhere, so Prettier and the audit agree on
 # Windows machines and runners that default to core.autocrlf=true.
 * text=auto eol=lf
-# Preserve third-party notice/source bytes exactly as recorded by the audit.
-/licenses/** -text
+# Preserve third-party notice/source bytes exactly as recorded by the audit, and
+# keep them out of GitHub's language statistics.
+/licenses/** -text linguist-vendored
 *.png -text
 *.ico -text

@@ -113,7 +113,7 @@ Timing/duration editing, recording, MusicXML/OMR, transcription and downloading 
 
 ## Documentation
 
-[Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/architecture.md) · [Timing](docs/timing.md) · [MIDI policy](docs/midi-policy.md) · [Test report](docs/test-report.md) · [Hardware checklist](docs/hardware-checklist.md) · [Dependency decisions](docs/dependencies.md)
+[Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [Timing](docs/timing.md) · [MIDI policy](docs/midi-policy.md) · [Test report](docs/test-report.md) · [Hardware checklist](docs/hardware-checklist.md) · [Dependency decisions](docs/dependencies.md)
 
 ## License
 

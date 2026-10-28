@@ -1,0 +1,99 @@
+name: Bug report
+description: Something in Keyloom doesn't work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't attach copyrighted MIDI files; describe the file, or attach one you made yourself.
+
+  - type: input
+    id: version
+    attributes:
+      label: Keyloom version
+      description: From the installer or ZIP file name, or Windows Settings → Apps → Installed apps.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run Keyloom?
+      options:
+        - Installer
+        - Portable ZIP
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: input
+    id: keyboard
+    attributes:
+      label: Keyboard model
+      placeholder: "Yamaha EZ-150, or none"
+
+  - type: input
+    id: interface
+    attributes:
+      label: MIDI connection
+      description: The input name shown under Keyboard & sound, and how it's connected.
+      placeholder: "USB MIDI Interface adapter (5-pin DIN)"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Importing or the library
+        - Practice (Listen, Wait for me or Timed)
+        - Keyboard & sound / MIDI devices
+        - Light Guide
+        - Practice versions and note editing
+        - MIDI export
+        - Install, update or uninstall
+        - Something else
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include any error message exactly as shown.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import …
+        2. Open Practice, choose Wait for me …
+        3. Press Play …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+
+  - type: textarea
+    id: midi
+    attributes:
+      label: About the MIDI file
+      description: If it's song-specific, describe the file (type 0 or 1, number of tracks, where it came from).
+
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, whether Light Guide was on, keyboard range settings, and whether the bug happens every time.
