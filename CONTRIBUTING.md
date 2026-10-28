@@ -69,7 +69,7 @@ Use your own MIDI input's name. Adding `-OutputDevice` also sends real Light Gui
 
 ## Reporting bugs
 
-Use the **Bug report** issue form. Include your keyboard and MIDI interface, and don't attach copyrighted MIDI files; describe the file instead or attach one you made.
+Use the **Bug report** issue form. Include your keyboard and MIDI interface, and don't attach copyrighted MIDI files; describe the file instead or attach one you made. Report security problems privately as described in [SECURITY.md](SECURITY.md), not in an issue.
 
 ## License
 
