@@ -4,7 +4,7 @@ Keyloom is an offline desktop app. It makes no network connections, listens on n
 
 ## Supported versions
 
-Security fixes target the latest published release, including the 0.4.2 beta once it is published. Older builds are not maintained. Check the [release list](https://github.com/mythicruntime-lab/keyloom/releases), which includes beta prereleases as well as stable releases.
+Security fixes target the latest published release, including beta prereleases. Older builds are not maintained. Check the [release list](https://github.com/mythicruntime-lab/keyloom/releases), which includes beta prereleases as well as stable releases.
 
 ## Reporting a vulnerability
 

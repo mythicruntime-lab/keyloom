@@ -2,7 +2,7 @@
 
 An original, offline Windows piano trainer built with Tauri 2, Rust, React, TypeScript and Canvas. Import a MIDI, open it immediately, and practice through a native USB MIDI input.
 
-**Beta candidate: 0.4.2-beta.1.** Windows 11 x64 only. Builds are unsigned. Automated native tests use generated music and simulated input; physical acceptance of the newer editing tools and a current-version installer retention check remain pending. See the [verification record](docs/test-report.md) and [hardware checklist](docs/hardware-checklist.md). Back up the application-data folder before trying a beta on an existing library.
+**Beta: 0.4.2-beta.1.** Download the portable ZIP or installer from [GitHub Releases](https://github.com/mythicruntime-lab/keyloom/releases/tag/v0.4.2-beta.1). Windows 11 x64 only. Builds are unsigned. Automated native tests use generated music and simulated input; physical acceptance of the newer editing tools and a current-version installer retention check remain pending. See the [verification record](docs/test-report.md) and [hardware checklist](docs/hardware-checklist.md). Back up the application-data folder before trying a beta on an existing library.
 
 ![Keyloom practice view with falling notes above an on-screen keyboard](docs/screenshots/practice-native.png)
 

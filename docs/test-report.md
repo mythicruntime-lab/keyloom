@@ -16,7 +16,7 @@ The Windows release executable and NSIS installer built with the pinned toolchai
 
 **Beta acceptance still pending:** physical playing/illumination for edited versions and preview tools, long-session/cable-loss edge cases, and installation/uninstallation retention with the current identifier on a disposable Windows 11 profile. Windows Sandbox is not installed on the build workstation. An installer `/D=` test directory does not isolate HKCU registrations, file associations or shortcuts, so the candidate is not installed over the maintainer's existing environment. Use a clean VM/profile to install, create a generated-demo library at the ordinary application-data path, hash it after closing, uninstall with data retained, compare hashes, then reinstall and reopen. The interactive optional Open-with choice also requires acceptance there. Package extraction and resource checks do not substitute for these checks.
 
-This is a limited beta candidate, not a stable/general-release sign-off. GitHub publication, protection rules and verification of private vulnerability reporting remain release-owner steps; the security policy provides a no-sensitive-details fallback when private reporting is unavailable.
+This verification supports a limited beta, not a stable/general-release sign-off. See the [GitHub release](https://github.com/mythicruntime-lab/keyloom/releases/tag/v0.4.2-beta.1) for publication status and downloads. Protection rules and verification of private vulnerability reporting remain release-owner checks; the security policy provides a no-sensitive-details fallback when private reporting is unavailable.
 
 ## 0.4.1 release packages — 28 October 2026
 
