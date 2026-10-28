@@ -63,9 +63,9 @@ The local release verification installed the rebuilt package, compared all 562 l
 
 ## Public-release items
 
-1. Confirm the copyright-holder wording and replace the explicit placeholder in `LICENSE`; no owner name has been invented.
+1. Resolved 27 October 2026: `LICENSE` names Tom Pearsall as copyright holder.
 2. Include `LICENSE`, `THIRD_PARTY_NOTICES.md`, this decision record, and the **entire `licenses` directory**, including MPL sources, in both installer resources and portable distributions. Verify the installed copies, not only the source tree.
 3. Resolve or explicitly accept the upstream prebuilt installer DLL's missing exact transitive/compiler provenance before public installer distribution; do not present its source manifest as a locked binary inventory. Confirm the static Microsoft runtime redistribution rights under the installed toolchain terms.
 4. Rerun the audit after lockfile/toolchain/installer changes. New unknown or changed licenses require review; an empty missing-text list alone is not a legal sign-off. Preserve the unpin omission or review the CC BY-SA material before reintroducing it.
 
-Private songs, user database files, source paths, logs, samples and hardware captures are excluded from release assets. Generated original exercises and the original icon use the project license once the copyright-holder field is resolved. Local system fonts are referenced, not copied.
+Private songs, user database files, source paths, logs, samples and hardware captures are excluded from release assets. Generated original exercises and the original icon use the project license. Local system fonts are referenced, not copied.

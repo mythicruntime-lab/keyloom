@@ -1,12 +1,24 @@
 # Keyloom
 
-An original, offline Windows piano trainer built with Tauri 2, Rust, React, TypeScript and Canvas. Import a MIDI, open it immediately, and practice through a native USB MIDI input. Project-authored code is prepared for MIT licensing; copyright-holder wording remains to be confirmed before public release.
+An original, offline Windows piano trainer built with Tauri 2, Rust, React, TypeScript and Canvas. Import a MIDI, open it immediately, and practice through a native USB MIDI input.
+
+![Keyloom practice view with falling notes above an on-screen keyboard](docs/screenshots/practice-native.png)
+
+- **Practice modes:** Listen, Wait for me (the song waits for the right keys) and Timed, with A–B loops, speed, count-in and metronome.
+- **Your own MIDI library:** import or drop `.mid` files; they are copied into a local library, never moved or uploaded.
+- **Practice versions:** make an easier copy of a song — remove notes, move them by a semitone or octave, thin chords, or fit a part to your keyboard's range — with Undo, while the original stays untouched. Export the result as a new MIDI file.
+- **Yamaha Light Guide:** optionally lights the next keys to play on a Yamaha EZ-150 over MIDI.
+- **Offline and private:** no account, server, cloud or internet connection is used.
+
+## Requirements
+
+Windows 11 x64 with the Microsoft Edge WebView2 Evergreen Runtime (included with Windows 11). Keyloom does not download or install WebView2. No administrator access, Python, Node, Rust or account is needed to run a built copy.
+
+Builds are currently unsigned, so Windows may show a security warning. Do not bypass it unless you trust where the build came from; you can always build from source instead.
 
 ## Run
 
-In a downloaded/extracted portable package, double-click `Keyloom.exe`. In this checkout, use `artifacts/Keyloom-0.4.0-windows-x64/Keyloom.exe`, or install `artifacts/Keyloom_0.4.0_x64-setup.exe`. These are unsigned local builds. Do not bypass Windows security warnings; review the source/build provenance or build locally if Windows blocks execution.
-
-Windows 11 x64 and the installed Microsoft Edge WebView2 Evergreen Runtime are required. WebView2 is already present on the development machine. The package does not download or install it. No administrator access, Python, Node, Rust, account, server, internet connection or NVIDIA setting change is needed to run the built app.
+In an extracted portable package, double-click `Keyloom.exe`. With the installer, start Keyloom from the Start menu.
 
 1. Choose **Import MIDI** or drop `.mid` / `.midi` files into the window. The result exposes **Open**, even when search or Favorites hides the song.
 2. Open **Keyboard & sound**, refresh devices, select your USB MIDI interface, and connect it. Select Yamaha speakers or PC basic-tone monitoring. Optional Light Guide output is configured separately. Imported SysEx/configuration messages and MIDI Thru are never sent to the keyboard.
@@ -14,7 +26,7 @@ Windows 11 x64 and the installed Microsoft Edge WebView2 Evergreen Runtime are r
 4. Open **Practice**, select Listen, Wait for me, or Timed, assign parts, and press Play. Play as a note's leading edge reaches the **bright pink line above the keys**. In Wait mode all target pitches require fresh key presses; the pedal does not satisfy notes. For a combined part, the adjustable pitch split is an approximate left/right guide and practice filter, not melody extraction.
 5. Use Pause, Restart, Stop, seek, A–B loops, speed, count-in/metronome, or Panic as needed. Keyboard, part, loop, speed and position settings persist.
 
-**Basic practice tone** is a generated synth sound, not a sampled piano. Your Yamaha's own speakers are the default player-monitoring choice. Accompaniment and Listen playback use the PC tone. SoundFonts and authentic General MIDI instrumentation are not included.
+**Basic practice tone** is a generated synth sound, not a sampled piano. Your keyboard's own speakers are the default player-monitoring choice. Accompaniment and Listen playback use the PC tone. SoundFonts and authentic General MIDI instrumentation are not included.
 
 ## Yamaha EZ-150 Light Guide
 
@@ -22,7 +34,7 @@ Connect the USB adapter's **OUT** plug to the Yamaha's **MIDI IN** (keep the exi
 
 In **Keyboard & sound**, choose the USB interface under **MIDI output**, then **Connect output**. **Test middle C** sends MIDI note 60 on channel 1 for two seconds and pauses practice. Turn on **Light Guide** there or in Practice. It lights the current target chord in Wait for me, or during Timed's matching window. Listen sends no guide notes; muted/accompaniment/percussion and notes outside your configured key range are excluded. Note messages can also sound the keyboard.
 
-Guide notes clear on pause, stop, seek, song/settings changes, guide disable, output disconnect, Panic and normal app exit. Reconnecting sends channel-1 Note Offs to clear interrupted notes. Keep other apps' MIDI Thru/echo off: returned MIDI has no marker proving whether it came from physical keys. Keyloom never routes guidance internally into player input, and simulated on-screen/computer keys now monitor only; they cannot satisfy targets or score.
+Guide notes clear on pause, stop, seek, song/settings changes, guide disable, output disconnect, Panic and normal app exit. Reconnecting sends channel-1 Note Offs to clear interrupted notes. Keep other apps' MIDI Thru/echo off: returned MIDI has no marker proving whether it came from physical keys. Keyloom never routes guidance internally into player input, and simulated on-screen/computer keys monitor only; they cannot satisfy targets or score.
 
 **Light Guide mutes all Keyloom PC audio** so you can listen to the Yamaha: key-press tones, Listen/accompaniment, count-in and metronome are silent while the toggle is on. Turn Light Guide off to restore PC audio. Your Yamaha/computer listening choice is retained, and the mute survives restart. This changes PC sound only; MIDI guide notes may still sound the Yamaha itself.
 
@@ -38,7 +50,7 @@ Immediate note moves and removals save when pressed; preview tools below save on
 
 ### Preview a simpler or more reachable part
 
-The approved 0.4.0 tools are under **Simplify and fit** in a practice version's note editor. For chord thinning, choose **All pitched parts** or one nonpercussion part, then a strategy:
+The 0.4.0 tools are under **Simplify and fit** in a practice version's note editor. For chord thinning, choose **All pitched parts** or one nonpercussion part, then a strategy:
 
 - **Highest note** keeps one note at each exact onset tick.
 - **Bass + highest** keeps one note at each of the lowest and highest distinct pitches; a unison keeps one.
@@ -54,21 +66,23 @@ After is shown first. Other edits, Undo and export are disabled while a preview 
 
 Choose **Export MIDI** in the practice-version toolbar or arrangement details to save a **new** file. A version export includes all saved notes at original tempo; practice speed, part roles, hand split and loops do not alter the file. Original-song export remains byte-exact. Version export preserves source timing and non-note events, but does not retarget expressive pressure to moved pitches. Ambiguous overlapping same-pitch releases and empty versions cannot be exported; see [MIDI policy](docs/midi-policy.md).
 
-Versions store their edits separately and refer to the original's managed MIDI. Remove dependent versions before removing that original from the library. Normal application data lives under `%LOCALAPPDATA%\app.keyloom.desktop`: `library.sqlite3`, managed `midi` originals and preferences. Source files are copied, never moved. Byte-identical files share one entry; different arrangements remain separate. Export refuses existing destination files. Removal asks for confirmation and deletes only the managed copy/record, never the external original. Keep the data directory when updating. Uninstall can retain this library; do not select an offered application-data deletion option if you want to keep your songs.
+### Where your data lives
+
+Versions store their edits separately and refer to the original's managed MIDI. Remove dependent versions before removing that original from the library. Application data lives under `%LOCALAPPDATA%\app.keyloom.desktop`: `library.sqlite3`, managed `midi` originals and preferences. Source files are copied, never moved. Byte-identical files share one entry; different arrangements remain separate. Export refuses existing destination files. Removal asks for confirmation and deletes only the managed copy/record, never the external original. Keep the data directory when updating. Uninstall can retain this library; do not select an offered application-data deletion option if you want to keep your songs.
 
 MIDI 0/1 with musical tick division are supported. Type 2 and SMPTE division receive explicit unsupported-format errors. See [MIDI policy](docs/midi-policy.md) for malformed input, event budgets, tempo conflicts, sustain and missing-release behavior.
 
-Open a file directly:
+Open a file directly from the portable folder:
 
 ```powershell
-& .\artifacts\Keyloom-0.4.0-windows-x64\Keyloom.exe 'C:\Music\easy song.mid'
+& .\Keyloom.exe 'C:\Music\easy song.mid'
 ```
 
 A second launch forwards the file to the running instance. During interactive installation you can optionally add Keyloom to Windows **Open with** for MIDI; the installer does not replace your default application. Silent installation skips that optional registration. Uninstall removes its own ordinary shortcuts. If you manually pinned Keyloom to the taskbar, unpin it manually after uninstall.
 
-## Build and check
+## Build from source
 
-Requirements: Node 24, Rust 1.98 MSVC, Visual Studio 2022 C++ Build Tools, Windows SDK and WebView2. Exact packages are locked. First-time dependency downloads need internet. Build commands only adjust their own process environment. Cargo defaults to two workers; use `-Jobs 1` to reduce load further.
+Requirements: Node 24, Rust 1.98 MSVC, Visual Studio 2022 C++ Build Tools, Windows SDK and WebView2. Exact packages are locked. First-time dependency downloads need internet.
 
 ```powershell
 powershell -File scripts/Build.ps1 -Mode restore
@@ -78,12 +92,31 @@ powershell -File scripts/Build.ps1 -Mode package -Jobs 2
 powershell -File scripts/Launch.ps1
 ```
 
-The launcher accounts for this machine's unusually long inherited PATH, which otherwise makes npm's Windows command shell lose executables. It never changes the registry or global environment. Tests that create temporary directories run as the normal Windows user on this workstation.
+`Build.ps1` runs with a shortened PATH in its own process, because a very long inherited PATH can make npm's Windows command shell lose executables. It never changes the registry or global environment. It expects Rust under `%USERPROFILE%\.cargo\bin`.
 
 Packaging writes the installer, portable folder, ZIP and `SHA256SUMS.txt` under `artifacts`. To refresh packages after updating notices/docs, run `powershell -File scripts/Build.ps1 -Mode bundle`. This does not compile changed source; use `Build.ps1 -Mode package` for code changes.
 
-See [test report](docs/test-report.md), [hardware checklist](docs/hardware-checklist.md), [architecture](docs/architecture.md), [timing](docs/timing.md), [dependency decisions](docs/dependencies.md), and [handoff](HANDOFF.md). Reproduce the native UI regression with `scripts/Native-Smoke.ps1` after building. The opt-in test uses an isolated data directory and explicitly simulated keys; it is not a Yamaha test.
+Reproduce the native UI regression with `scripts/Native-Smoke.ps1` after building. The opt-in test uses an isolated data directory and explicitly simulated keys; it is not a physical keyboard test.
 
-## Release boundaries
+## Known limitations
 
-The approved M4 work supports named practice versions, selected-note removal and semitone/octave moves, previewed chord thinning/range fitting, persistent mixed Undo, and edited MIDI export. Timing/duration editing and recording remain deferred, along with M5–M6: MusicXML/OMR, transcription and downloading. No cloud, account system or LLM dependency exists. No commercial songs, fonts, samples or SoundFonts are distributed. The generated original demo and app icon are project assets. Third-party components retain their own terms; ship `THIRD_PARTY_NOTICES.md` and the complete `licenses` directory, including MPL source archives, with every package.
+- Windows x64 only; no other platform has been tested.
+- The practice sound is a basic synth tone, not a sampled piano. SoundFonts, full General MIDI fidelity and general MIDI playback output are not included.
+- Chord thinning is a pitch/onset heuristic and does not identify melody.
+- Light Guide notes may sound the Yamaha as well as light its keys; no silent-LED mode is claimed.
+- MIDI type 2 and SMPTE timing are unsupported. If the Windows audio output changes or fails, restart Keyloom to reopen it.
+- Several hardware edge cases (repeated notes, long sessions, cable loss while lit, 4K scaling, end-to-end latency) are still listed in the [hardware checklist](docs/hardware-checklist.md).
+
+Timing/duration editing, recording, MusicXML/OMR, transcription and downloading are not implemented; see the [roadmap](ROADMAP.md).
+
+## Documentation
+
+[Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/architecture.md) · [Timing](docs/timing.md) · [MIDI policy](docs/midi-policy.md) · [Test report](docs/test-report.md) · [Hardware checklist](docs/hardware-checklist.md) · [Dependency decisions](docs/dependencies.md)
+
+## License
+
+Keyloom's own code and original assets (the generated demo song and app icon) are released under the [MIT License](LICENSE), © 2026 Tom Pearsall.
+
+Third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses` directory. Anyone redistributing Keyloom must ship both, including the MPL source archives in `licenses/sources`. No commercial songs, fonts, samples or SoundFonts are distributed.
+
+Yamaha and EZ-150 are trademarks of Yamaha Corporation. Keyloom is an independent project and is not affiliated with or endorsed by Yamaha.

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 [COPYRIGHT HOLDER TO BE CONFIRMED BEFORE PUBLIC RELEASE]
+Copyright (c) 2026 Tom Pearsall
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Release preparation note: the copyright-holder field is intentionally
-unresolved. Obtain the owner's wording and replace the placeholder before
-public distribution. This license is intended for project-authored Keyloom
-code and original assets only. Third-party components retain their own
-licenses; see THIRD_PARTY_NOTICES.md and the accompanying licenses directory.
