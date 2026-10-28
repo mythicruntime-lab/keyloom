@@ -2,6 +2,10 @@
 
 User-visible changes to Keyloom are recorded here. Versions up to 0.4.0 were local builds made before the repository was published.
 
+## 0.4.2 — unreleased
+
+- When no MIDI output is connected, the Light Guide checkboxes now say why they can't be ticked instead of only explaining on hover. On the practice screen, the hint opens Keyboard & sound.
+
 ## 0.4.1 — 2026-10-28
 
 First public release. No practice, library or editing behavior changed from 0.4.0.

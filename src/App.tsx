@@ -1256,6 +1256,10 @@ export default function App() {
     outputSelection ??
     preferences.output_device_id ??
     (matchingOutputs.length === 1 ? matchingOutputs[0].id : "");
+  // Light Guide can't be turned on without an output; it can still be turned
+  // off after the output drops.
+  const guideNeedsOutput =
+    native && !status.output_connected && !preferences.light_guide;
   const rangeWarningCount = useMemo(
     () =>
       current?.entry.original_id
@@ -1784,11 +1788,11 @@ export default function App() {
                     <input
                       type="checkbox"
                       aria-label="Light Guide in practice"
-                      checked={preferences.light_guide ?? false}
-                      disabled={
-                        !native ||
-                        (!status.output_connected && !preferences.light_guide)
+                      aria-describedby={
+                        guideNeedsOutput ? "practice-guide-hint" : undefined
                       }
+                      checked={preferences.light_guide ?? false}
+                      disabled={!native || guideNeedsOutput}
                       onChange={(event) =>
                         void updatePreferences({
                           light_guide: event.target.checked,
@@ -1798,6 +1802,15 @@ export default function App() {
                     Light Guide
                     {preferences.light_guide ? " · PC audio muted" : ""}
                   </label>
+                  {guideNeedsOutput && (
+                    <button
+                      id="practice-guide-hint"
+                      className="text-button guide-hint"
+                      onClick={() => setView("devices")}
+                    >
+                      Connect a MIDI output first
+                    </button>
+                  )}
                   <button
                     className="small-button"
                     onClick={() => setShowParts((value) => !value)}
@@ -2536,11 +2549,11 @@ export default function App() {
                   <input
                     type="checkbox"
                     aria-label="Light Guide"
-                    checked={preferences.light_guide ?? false}
-                    disabled={
-                      !native ||
-                      (!status.output_connected && !preferences.light_guide)
+                    aria-describedby={
+                      guideNeedsOutput ? "settings-guide-hint" : undefined
                     }
+                    checked={preferences.light_guide ?? false}
+                    disabled={!native || guideNeedsOutput}
                     onChange={(event) =>
                       void updatePreferences({
                         light_guide: event.target.checked,
@@ -2548,6 +2561,11 @@ export default function App() {
                     }
                   />
                   Light Guide
+                  {guideNeedsOutput && (
+                    <span id="settings-guide-hint" className="guide-hint">
+                      · connect an output above first
+                    </span>
+                  )}
                 </label>
                 <p className="help-text">
                   Light Guide sends only the current Wait for me or Timed

@@ -824,6 +824,44 @@ export async function runNativeSmoke() {
         },
       );
       await check(
+        "Light Guide shows why it is unavailable without an output",
+        async () => {
+          assert(
+            !(await snapshot()).output_connected,
+            "Output connected before the Light Guide hint check",
+          );
+          await navigate("Practice", ".practice-view");
+          const practiceToggle = get<HTMLInputElement>(
+            'input[aria-label="Light Guide in practice"]',
+          );
+          const practiceHint = get<HTMLButtonElement>("#practice-guide-hint");
+          assert(
+            practiceToggle.disabled &&
+              practiceToggle.getAttribute("aria-describedby") ===
+                practiceHint.id,
+            "Practice Light Guide is not disabled with a linked hint",
+          );
+          practiceHint.click();
+          await waitFor("hint opens Keyboard & sound", () =>
+            document.querySelector(".devices-view"),
+          );
+          const settingsToggle = get<HTMLInputElement>(
+            'input[aria-label="Light Guide"]',
+          );
+          const settingsHint = get<HTMLElement>("#settings-guide-hint");
+          assert(
+            settingsToggle.disabled &&
+              settingsToggle.getAttribute("aria-describedby") ===
+                settingsHint.id,
+            "Settings Light Guide is not disabled with a linked hint",
+          );
+          return {
+            practice_hint: practiceHint.textContent,
+            settings_hint: settingsHint.textContent,
+          };
+        },
+      );
+      await check(
         "simulated input is monitored but cannot satisfy the native wait target",
         async () => {
           await navigate("Keyboard & sound", ".devices-view");

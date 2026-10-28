@@ -2289,6 +2289,13 @@ main:has(> .import-banner) .practice-body {
   white-space: nowrap;
   font-size: 11px;
 }
+.guide-hint {
+  white-space: nowrap;
+  font-size: 11px;
+}
+.check .guide-hint {
+  color: var(--muted);
+}
 .output-actions,
 .guide-test-row {
   display: flex;
