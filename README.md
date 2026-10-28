@@ -82,7 +82,7 @@ A second launch forwards the file to the running instance. During interactive in
 
 ## Build from source
 
-Requirements: Node 24, Rust 1.98 MSVC, Visual Studio 2022 C++ Build Tools, Windows SDK and WebView2. Exact packages are locked. First-time dependency downloads need internet.
+Requirements: Node 24 (see `.nvmrc`), Rust 1.98 MSVC (pinned in `rust-toolchain.toml`; rustup installs it on first use), Visual Studio 2022 C++ Build Tools, Windows SDK and WebView2. Exact packages are locked. First-time dependency downloads need internet.
 
 ```powershell
 powershell -File scripts/Build.ps1 -Mode restore
@@ -92,7 +92,9 @@ powershell -File scripts/Build.ps1 -Mode package -Jobs 2
 powershell -File scripts/Launch.ps1
 ```
 
-`Build.ps1` runs with a shortened PATH in its own process, because a very long inherited PATH can make npm's Windows command shell lose executables. It never changes the registry or global environment. It expects Rust under `%USERPROFILE%\.cargo\bin`.
+`Build.ps1` runs with a shortened PATH in its own process, because a very long inherited PATH can make npm's Windows command shell lose executables. It never changes the registry or global environment. It expects Rust under `%USERPROFILE%\.cargo\bin`. It uses two Cargo workers by default to leave room for other work; pass `-Jobs` to change that. Plain `cargo` commands use Cargo's normal parallelism.
+
+Every push and pull request runs the same formatting, type, lint, test and license-audit checks on GitHub Actions ([workflow](.github/workflows/check.yml)). The native smoke test needs a real MIDI interface and runs locally only.
 
 Packaging writes the installer, portable folder, ZIP and `SHA256SUMS.txt` under `artifacts`. To refresh packages after updating notices/docs, run `powershell -File scripts/Build.ps1 -Mode bundle`. This does not compile changed source; use `Build.ps1 -Mode package` for code changes.
 
