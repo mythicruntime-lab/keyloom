@@ -24,12 +24,8 @@ foreach ($file in @('LICENSE','THIRD_PARTY_NOTICES.md','README.md','ROADMAP.md',
     Copy-Item -LiteralPath (Join-Path $root $file) -Destination $destination
 }
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $destination -Recurse
-$docs = Join-Path $destination 'docs'
-New-Item -ItemType Directory -Path $docs | Out-Null
-foreach ($file in @('architecture.md','dependencies.md','hardware-checklist.md','midi-policy.md','test-report.md','timing.md')) {
-    Copy-Item -LiteralPath (Join-Path $root "docs\$file") -Destination $docs
-}
-Copy-Item -LiteralPath (Join-Path $root 'docs\screenshots') -Destination $docs -Recurse
+# Same docs as the installer, which bundles the whole folder.
+Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse
 Copy-Item -LiteralPath $installer -Destination (Join-Path $artifacts (Split-Path $installer -Leaf)) -Force
 $zip = Join-Path $artifacts "$name.zip"
 # Some upstream notices have epoch timestamps outside ZIP's 1980–2107 range.

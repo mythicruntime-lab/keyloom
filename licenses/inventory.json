@@ -5,8 +5,8 @@
     "custom-protocol"
   ],
   "lockfile_sha256": {
-    "cargo": "cd3536448ad1d3f5808370793be4e535cc3511423795ee59bf3c98d78d48a430",
-    "npm": "2dc0192e9f90f3604ce4b0c4132c2093754c39b4c04fb122f4e5d87311ece5b8"
+    "cargo": "09aa6d47c84e66529ffadf06b79d9c269ec646794c5d2e900625f75a5f5b1590",
+    "npm": "96a6796014b7b1daaddb37c2bd68bdf31b41ee1a991282a7b56cf1f0c3e36fec"
   },
   "counts": {
     "cargo_lock_packages": 508,
@@ -6961,7 +6961,7 @@
         "scope": "cache input; includes potentially unused standard plugins, not an extracted installer inventory"
       }
     ],
-    "generated_script_sha256": "4c81b8002e4f6cf2dd90965c4850da306baa210ddc68458d2f7c29443eea4ff6",
+    "generated_script_sha256": "9c5c5561ba6149bcf518e809188416dced381ec0102cc6ce5125b84cec42bcd1",
     "hooks_sha256": "d5b161c1a4a290a7b023a9fd747e660f9042da83bfff35181cc41872474d29f2",
     "optional_unpin_helper": {
       "excluded_by_empty_override": true,

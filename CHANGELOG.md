@@ -2,9 +2,13 @@
 
 User-visible changes to Keyloom are recorded here. Versions up to 0.4.0 were local builds made before the repository was published.
 
-## Unreleased
+## 0.4.1 — 2026-10-28
+
+First public release. No practice, library or editing behavior changed from 0.4.0.
 
 - Changed the app identifier from `app.keyloom.desktop`, which pointed at a domain the project doesn't own, to `io.github.mythicruntime-lab.keyloom`. Application data now lives in `%LOCALAPPDATA%\io.github.mythicruntime-lab.keyloom`. Libraries from 0.4.0 and earlier are not moved automatically; copy the old folder's contents across with Keyloom closed. The installer's publisher stays `keyloom`, so upgrades still find the existing install.
+- Rewrote the bundled README for new users and replaced the internal handoff notes with `ROADMAP.md`. The portable ZIP now includes the same `docs` folder as the installer.
+- Recorded the release decisions on the statically linked Microsoft runtime and Tauri's prebuilt installer helper in `docs/dependencies.md`.
 
 ## 0.4.0 — 2026-10-12
 

@@ -2,6 +2,14 @@
 
 This is the release-by-release verification record. "The maintainer" is the person who ran the physical Yamaha checks. Paths under `test-output/` name local evidence that is deliberately not committed (it contains private libraries, logs and test MIDI).
 
+## 0.4.1 release packages — 28 October 2026
+
+0.4.1 changes the app identifier to `io.github.mythicruntime-lab.keyloom`, pins the installer publisher to `keyloom`, bumps the version and updates the bundled docs. No application source changed. The release executable was built with the pinned Rust 1.98.0 and two Cargo workers; the generated installer script names the new identifier with the unchanged publisher. The license audit passed with 264 Windows Rust dependencies, 81 npm lock entries and no unresolved items. Repeated bundling showed that Tauri writes the installer's 576 `CreateDirectory` lines in a different order each time, so the audit now sorts those lines before hashing the script; two consecutive bundle-and-audit rounds then record the same inventory. The audit also now lists Keyloom's own lockfile entry as plain `MIT`, dropping the stale "copyright holder pending" label.
+
+Package verification (`test-output/package-041-verification.json`): every `SHA256SUMS.txt` entry matches; all 581 files in the portable folder match the ZIP; and all 580 expected resources (top-level notices and docs, the 562 files under `licenses`, and the whole `docs` folder) are byte-identical to the repository in both the portable folder and the installer payload, extracted with 7-Zip rather than installed. The installer's `keyloom.exe` differs from the portable one only in Tauri's three-byte bundle marker. Install/uninstall retention was last exercised for 0.1.0 and was not repeated.
+
+The packaged portable executable (SHA-256 `67c8e4b8a40f2693f318f3acf08f21408a9f2a330baf0621c53fca54b27c1a03`) passed the native exercise (13 checks, 16,903.3 ms) and restart (3 checks, 926.9 ms) with **USB MIDI Interface** as input and Light Guide output. Nobody watched the keyboard during this run. Physical acceptance of the 0.4.0 preview tools is still pending in the [hardware checklist](hardware-checklist.md).
+
 ## Fresh-clone verification — 27 October 2026
 
 A new clone of commit `e35fb1c` in an empty folder, with the pinned Rust 1.98.0 and Node 24.11.1 and two Cargo workers, passed every GitHub Actions step: `npm ci`, TypeScript, Prettier, frontend build, rustfmt, strict Clippy (181 s), the Rust tests with the release protocol feature (190 s) and the license audit with no drift. `Build.ps1 -Mode package` then built the release executable, NSIS installer, portable folder, ZIP and checksums (402 s). No untracked file was needed.

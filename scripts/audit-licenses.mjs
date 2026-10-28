@@ -464,7 +464,7 @@ const cargoLock = cargoLockText
       license:
         selected?.license ??
         (field("name") === "keyloom"
-          ? "MIT; copyright holder pending"
+          ? "MIT"
           : "not audited for excluded target"),
       role:
         selected?.role ??
@@ -595,9 +595,21 @@ if (
   // Tauri writes absolute checkout and NSIS cache paths into the script; hash it
   // with those replaced so the recorded value does not depend on the machine.
   const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const portableScript = script
+  const pathFreeLines = script
     .replace(new RegExp(escapeRegExp(root), "gi"), "<repo>")
-    .replace(new RegExp(escapeRegExp(nsisCache), "gi"), "<nsis>");
+    .replace(new RegExp(escapeRegExp(nsisCache), "gi"), "<nsis>")
+    .split("\n");
+  // Tauri also emits the CreateDirectory lines in a different order on every
+  // bundle; sort them in place so only real script changes alter the hash.
+  const isCreateDirectory = (line) =>
+    line.trimStart().startsWith("CreateDirectory ");
+  const directories = pathFreeLines.filter(isCreateDirectory).sort();
+  let nextDirectory = 0;
+  const portableScript = pathFreeLines
+    .map((line) =>
+      isCreateDirectory(line) ? directories[nextDirectory++] : line,
+    )
+    .join("\n");
   if (nsisVersion !== "v3.11")
     issues.push(`Installer: unreviewed NSIS version ${nsisVersion}`);
   if (compression !== "zlib")
