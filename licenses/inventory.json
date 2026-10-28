@@ -6961,7 +6961,7 @@
         "scope": "cache input; includes potentially unused standard plugins, not an extracted installer inventory"
       }
     ],
-    "generated_script_sha256": "d820bb1bb285e26bd95acf05887a2fa11f4bda82cff615b469453eb70e10a050",
+    "generated_script_sha256": "4c81b8002e4f6cf2dd90965c4850da306baa210ddc68458d2f7c29443eea4ff6",
     "hooks_sha256": "d5b161c1a4a290a7b023a9fd747e660f9042da83bfff35181cc41872474d29f2",
     "optional_unpin_helper": {
       "excluded_by_empty_override": true,

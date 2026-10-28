@@ -2,6 +2,10 @@
 
 User-visible changes to Keyloom are recorded here. Versions up to 0.4.0 were local builds made before the repository was published.
 
+## Unreleased
+
+- Changed the app identifier from `app.keyloom.desktop`, which pointed at a domain the project doesn't own, to `io.github.mythicruntime-lab.keyloom`. Application data now lives in `%LOCALAPPDATA%\io.github.mythicruntime-lab.keyloom`. Libraries from 0.4.0 and earlier are not moved automatically; copy the old folder's contents across with Keyloom closed. The installer's publisher stays `keyloom`, so upgrades still find the existing install.
+
 ## 0.4.0 — 2026-10-12
 
 - Added previewed chord thinning across all pitched parts jointly or a chosen part: highest note, bass plus highest distinct pitches, or the highest 1–8 note events at each exact onset tick. Percussion is excluded; ties use stable note IDs. This is a simplification heuristic, not melody extraction.
