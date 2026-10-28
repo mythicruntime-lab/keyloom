@@ -1,6 +1,6 @@
 [package]
 name = "keyloom"
-version = "0.4.1"
+version = "0.4.2-beta.1"
 description = "An original offline Windows piano trainer"
 edition = "2021"
 license = "MIT"

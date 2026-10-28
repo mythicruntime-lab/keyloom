@@ -2,6 +2,8 @@
 
 An original, offline Windows piano trainer built with Tauri 2, Rust, React, TypeScript and Canvas. Import a MIDI, open it immediately, and practice through a native USB MIDI input.
 
+**Beta candidate: 0.4.2-beta.1.** Windows 11 x64 only. Builds are unsigned. Automated native tests use generated music and simulated input; physical acceptance of the newer editing tools and a current-version installer retention check remain pending. See the [verification record](docs/test-report.md) and [hardware checklist](docs/hardware-checklist.md). Back up the application-data folder before trying a beta on an existing library.
+
 ![Keyloom practice view with falling notes above an on-screen keyboard](docs/screenshots/practice-native.png)
 
 - **Practice modes:** Listen, Wait for me (the song waits for the right keys) and Timed, with A–B loops, speed, count-in and metronome.
@@ -72,6 +74,8 @@ Versions store their edits separately and refer to the original's managed MIDI. 
 
 MIDI 0/1 with musical tick division are supported. Type 2 and SMPTE division receive explicit unsupported-format errors. See [MIDI policy](docs/midi-policy.md) for malformed input, event budgets, tempo conflicts, sustain and missing-release behavior.
 
+Practice position and settings are saved periodically. If an automatic save fails, a warning remains visible across screens while Keyloom retries; it clears after a successful retry. If the final save fails when closing, choose **No** to keep Keyloom open and retry, or **Yes** to close without the latest unsaved position/settings. Previously saved notes and original MIDI files are unaffected by that choice.
+
 Open a file directly from the portable folder:
 
 ```powershell
@@ -94,7 +98,7 @@ powershell -File scripts/Launch.ps1
 
 `Build.ps1` runs with a shortened PATH in its own process, because a very long inherited PATH can make npm's Windows command shell lose executables. It never changes the registry or global environment. It expects Rust under `%USERPROFILE%\.cargo\bin`. It uses two Cargo workers by default to leave room for other work; pass `-Jobs` to change that. Plain `cargo` commands use Cargo's normal parallelism.
 
-Every push and pull request runs the same formatting, type, lint, test and license-audit checks on GitHub Actions ([workflow](.github/workflows/check.yml)). The native smoke test needs a real MIDI interface and runs locally only.
+Every push to main and pull request runs the same formatting, type, lint, test and license-audit checks on GitHub Actions ([workflow](.github/workflows/check.yml)). The native smoke test runs locally; its core checks need no MIDI hardware. Pass `-Device` / `-OutputDevice` to additionally exercise an available interface. Neither run proves physical playing or illumination.
 
 Packaging writes the installer, portable folder, ZIP and `SHA256SUMS.txt` under `artifacts`. To refresh packages after updating notices/docs, run `powershell -File scripts/Build.ps1 -Mode bundle`. This does not compile changed source; use `Build.ps1 -Mode package` for code changes.
 

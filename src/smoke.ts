@@ -606,6 +606,104 @@ export async function runNativeSmoke() {
         return { count: entries.length };
       });
       await check(
+        "overlapping preference changes retain both edits and recover after an invalid edit",
+        async () => {
+          await navigate("Keyboard & sound", ".devices-view");
+          const original = await invoke<Preferences>("preferences");
+          const labels = inputByLabel("Show note labels");
+          const numbers = inputByLabel("Use MIDI note numbers");
+          const low = get<HTMLSelectElement>(
+            'select[aria-label="Lowest keyboard key"]',
+          );
+          const high = get<HTMLSelectElement>(
+            'select[aria-label="Highest keyboard key"]',
+          );
+          await waitFor(
+            "initial preferences rendered",
+            () =>
+              labels.checked === original.labels &&
+              numbers.checked === original.note_numbers &&
+              Number(low.value) === original.low &&
+              Number(high.value) === original.high,
+          );
+          // Dispatch both UI actions in one turn, before either IPC can reply.
+          labels.click();
+          numbers.click();
+          await waitFor("both display changes saved and rendered", async () => {
+            const saved = await invoke<Preferences>("preferences");
+            return (
+              saved.labels === !original.labels &&
+              saved.note_numbers === !original.note_numbers &&
+              labels.checked === saved.labels &&
+              numbers.checked === saved.note_numbers
+            );
+          });
+          assert(original.high - original.low > 3, "Smoke range is too narrow");
+          setSelect(low, String(original.low + 1));
+          setSelect(high, String(original.high - 1));
+          await waitFor("both range endpoints saved and rendered", async () => {
+            const saved = await invoke<Preferences>("preferences");
+            return (
+              saved.low === original.low + 1 &&
+              saved.high === original.high - 1 &&
+              Number(low.value) === saved.low &&
+              Number(high.value) === saved.high
+            );
+          });
+          // A rejected range must not poison the queue or leak into the next save.
+          setSelect(low, String(original.high - 1));
+          labels.click();
+          await waitFor(
+            "invalid edit reported and next valid edit saved",
+            async () => {
+              const saved = await invoke<Preferences>("preferences");
+              return (
+                [...document.querySelectorAll('[role="alert"]')].some((alert) =>
+                  alert.textContent?.includes(
+                    "The lowest key must be below the highest key.",
+                  ),
+                ) &&
+                saved.labels === original.labels &&
+                labels.checked === original.labels &&
+                saved.low === original.low + 1 &&
+                saved.high === original.high - 1
+              );
+            },
+          );
+          get<HTMLButtonElement>('button[aria-label="Dismiss error"]').click();
+          await setKeyboardRange(original.low, original.high);
+          numbers.click();
+          const restored = await waitFor(
+            "original preferences restored",
+            async () => {
+              const saved = await invoke<Preferences>("preferences");
+              return saved.labels === original.labels &&
+                saved.note_numbers === original.note_numbers &&
+                numbers.checked === original.note_numbers
+                ? saved
+                : null;
+            },
+          );
+          assert(
+            restored.device_id === original.device_id &&
+              restored.output_device_id === original.output_device_id,
+            "Preference edits changed a native-owned device selection",
+          );
+          assert(
+            !(await snapshot()).persistence_error &&
+              !document.querySelector(".persistence-error"),
+            "Healthy preferences should not show a persistence warning",
+          );
+          await navigate("Library", ".library-view");
+          return {
+            overlapping_display_edits: true,
+            overlapping_range_edits: true,
+            invalid_edit_recovery: true,
+            device_selection_preserved: true,
+          };
+        },
+      );
+      await check(
         "import while search and favorites hide entries; corrupt batch item does not block valid MIDI",
         async () => {
           const search = get<HTMLInputElement>(
@@ -658,6 +756,60 @@ export async function runNativeSmoke() {
             canonical_id: first.id,
             source:
               "real native files-opened event → UI import queue → import_files → library query → direct Open",
+          };
+        },
+      );
+      await check(
+        "automatic save failure remains visible across navigation and clears after retry",
+        async () => {
+          await invoke("smoke_save_failure", { enabled: true });
+          let failure = "";
+          try {
+            failure = await waitFor(
+              "automatic save failure reaches native status and UI",
+              async () => {
+                const state = await snapshot();
+                const banner = document.querySelector(".persistence-error");
+                return state.persistence_error &&
+                  banner?.textContent?.includes(state.persistence_error)
+                  ? state.persistence_error
+                  : null;
+              },
+            );
+            assert(
+              !document.querySelector(".persistence-error button"),
+              "An unresolved save failure must not be dismissible",
+            );
+            await navigate("Library", ".library-view");
+            await sleep(300);
+            assert(
+              document
+                .querySelector(".persistence-error")
+                ?.textContent?.includes(failure),
+              "Navigation hid an unresolved save failure",
+            );
+            await navigate("Practice", ".practice-view");
+            assert(
+              (await snapshot()).persistence_error === failure &&
+                document
+                  .querySelector(".persistence-error")
+                  ?.textContent?.includes(failure),
+              "Save failure did not remain visible in Practice",
+            );
+          } finally {
+            // A failing assertion must not leave fault injection blocking the report.
+            await invoke("smoke_save_failure", { enabled: false });
+          }
+          await waitFor(
+            "successful automatic save clears native status and banner",
+            async () =>
+              !(await snapshot()).persistence_error &&
+              !document.querySelector(".persistence-error"),
+          );
+          return {
+            failure,
+            persistent_across_navigation: true,
+            automatic_retry_recovered: true,
           };
         },
       );

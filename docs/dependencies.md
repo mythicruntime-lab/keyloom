@@ -59,11 +59,11 @@ An optional upstream `UnpinShortcut` macro adapts [Anders' Stack Overflow answer
 
 `node scripts/audit-licenses.mjs --fetch-installer-notices` refreshes pinned installer notices. The ordinary audit inspects the cache and generated installer when present without compiling. `KEYLOOM_NSIS_DIR` can override the cache location. This is static input inspection, not extracted-binary verification: NSIS `/PPO` reported unresolved plugin registration during preprocessing, although the ordinary installer build succeeded. Final packaging and installed-resource comparison are separate checks and must be reported by the release workflow.
 
-The local release verification installed the rebuilt package, compared all 562 license/source files and both top-level notice documents byte-for-byte, ran its native import/play/restart test, then uninstalled it while verifying existing library/preferences retention. These checks passed; see [test report](test-report.md). This does not resolve the explicitly stated upstream binary-provenance or toolchain-rights questions.
+The 0.1.0 local release verification installed the rebuilt package, compared all 562 license/source files and both top-level notice documents byte-for-byte, ran its native import/play/restart test, then uninstalled it while verifying existing library/preferences retention. Those checks passed; see the release-specific [test report](test-report.md) for later package verification and its limits. Package checks do not establish the upstream helper DLL's exact binary provenance. The maintainer's distribution decisions for that DLL and the Microsoft runtime are recorded below.
 
 ## Release decisions for 0.4.1
 
-**Status: approved by the maintainer on 28 October 2026.** This records the technical reasoning; it is not legal advice.
+**Status: approved by the maintainer on 28 October 2026.** These decisions continue to apply to the 0.4.2 beta while the toolchain, dependency selections and installer components described here remain unchanged. This records the technical reasoning; it is not legal advice.
 
 ### Statically linked Microsoft C/C++ runtime
 

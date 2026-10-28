@@ -160,6 +160,8 @@ export default function App() {
   };
   const importQueue = useRef(Promise.resolve());
   const openQueue = useRef(Promise.resolve());
+  const preferenceQueue = useRef(Promise.resolve());
+  const savedPreferences = useRef(DEFAULT_PREFERENCES);
   const pendingImports = useRef(0);
   const eventHistory = useRef<MidiEvent[]>([]);
   const refreshStatusSoon = useRef<() => void>(() => {});
@@ -287,22 +289,34 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [reload]);
 
-  const updatePreferences = useCallback(
-    async (patch: Partial<Preferences>) => {
-      const value = { ...latest.current.preferences, ...patch };
-      if (value.low >= value.high) {
-        setError("The lowest key must be below the highest key.");
-        return;
-      }
-      try {
-        const saved = await invoke<Preferences>("preferences", { value });
-        latest.current.preferences = saved;
-        setPreferences(saved);
-      } catch (reason) {
-        report(reason);
-      }
+  const acceptPreferences = useCallback((value: Preferences) => {
+    savedPreferences.current = value;
+    latest.current.preferences = value;
+    setPreferences(value);
+  }, []);
+  const queuePreferences = useCallback(
+    (work: () => Promise<void>) => {
+      // Reads and device changes share the queue so an older refresh cannot
+      // replace a newer acknowledgement. A failed action does not block later ones.
+      preferenceQueue.current = preferenceQueue.current
+        .then(work)
+        .catch(report);
+      return preferenceQueue.current;
     },
     [report],
+  );
+  const updatePreferences = useCallback(
+    (patch: Partial<Preferences>) =>
+      queuePreferences(async () => {
+        // Merge only when this action runs, after earlier saves acknowledge.
+        const value = { ...savedPreferences.current, ...patch };
+        if (value.low >= value.high) {
+          throw new Error("The lowest key must be below the highest key.");
+        }
+        const saved = await invoke<Preferences>("preferences", { value });
+        acceptPreferences(saved);
+      }),
+    [acceptPreferences, queuePreferences],
   );
   const applyPreferencesRef = useRef(updatePreferences);
   applyPreferencesRef.current = updatePreferences;
@@ -432,14 +446,10 @@ export default function App() {
     const cleanups: (() => void)[] = [];
     const addCleanup = (cleanup: () => void) =>
       disposed ? cleanup() : cleanups.push(cleanup);
-    void invoke<Preferences>("preferences")
-      .then((value) => {
-        if (!disposed) {
-          latest.current.preferences = value;
-          setPreferences(value);
-        }
-      })
-      .catch(report);
+    void queuePreferences(async () => {
+      const value = await invoke<Preferences>("preferences");
+      if (!disposed) acceptPreferences(value);
+    });
     void refreshDevices();
     const consume = async () => {
       try {
@@ -469,7 +479,7 @@ export default function App() {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [refreshDevices, report]);
+  }, [acceptPreferences, queuePreferences, refreshDevices, report]);
 
   useEffect(() => {
     if (!native) return;
@@ -495,6 +505,7 @@ export default function App() {
               previous.device_error === value.device_error &&
               previous.audio_available === value.audio_available &&
               previous.audio_error === value.audio_error &&
+              previous.persistence_error === value.persistence_error &&
               previous.dropped_events === value.dropped_events;
             const sameKeys =
               latest.current.view === "library" ||
@@ -1120,27 +1131,31 @@ export default function App() {
       report(reason);
     }
   };
-  const connectDevice = async (id: string | null) => {
-    try {
-      await invoke("connect_device", { id });
-      await updatePreferences({ device_id: id });
-    } catch (reason) {
-      report(reason);
-    }
-  };
-  const connectOutput = async (id: string | null) => {
+  const connectDevice = (id: string | null) =>
+    queuePreferences(async () => {
+      try {
+        await invoke("connect_device", { id });
+      } finally {
+        // Only the native connection command owns the selected device ID,
+        // including a saved selection whose connection attempt failed.
+        acceptPreferences(await invoke<Preferences>("preferences"));
+        refreshStatusSoon.current();
+      }
+    });
+  const connectOutput = (id: string | null) => {
     setOutputBusy(true);
-    try {
-      await invoke("connect_output", { id });
-      const value = await invoke<Preferences>("preferences");
-      latest.current.preferences = value;
-      setPreferences(value);
-      refreshStatusSoon.current();
-    } catch (reason) {
-      report(reason);
-    } finally {
-      setOutputBusy(false);
-    }
+    return queuePreferences(async () => {
+      try {
+        try {
+          await invoke("connect_output", { id });
+        } finally {
+          acceptPreferences(await invoke<Preferences>("preferences"));
+          refreshStatusSoon.current();
+        }
+      } finally {
+        setOutputBusy(false);
+      }
+    });
   };
   const testLight = async () => {
     setLightTestPending(true);
@@ -1372,6 +1387,11 @@ export default function App() {
           <div className="preview-banner">
             Disconnected browser preview — imports, audio, and MIDI require the
             Windows application.
+          </div>
+        )}
+        {status.persistence_error && (
+          <div role="alert" className="alert error persistence-error">
+            <span>{status.persistence_error}</span>
           </div>
         )}
         {error && (

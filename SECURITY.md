@@ -4,11 +4,13 @@ Keyloom is an offline desktop app. It makes no network connections, listens on n
 
 ## Supported versions
 
-Only the [latest release](https://github.com/mythicruntime-lab/keyloom/releases/latest) gets security fixes.
+Security fixes target the latest published release, including the 0.4.2 beta once it is published. Older builds are not maintained. Check the [release list](https://github.com/mythicruntime-lab/keyloom/releases), which includes beta prereleases as well as stable releases.
 
 ## Reporting a vulnerability
 
-Please don't open a public issue. Report it privately instead: on the repository's **Security** tab, choose **Report a vulnerability**. Only you and the maintainer can see the report.
+Please don't publish vulnerability details in an issue. When private vulnerability reporting is enabled, use the repository's **Security** tab and choose **Report a vulnerability** to send a private report to the maintainer.
+
+If that button is unavailable, open an issue asking the maintainer to enable private vulnerability reporting. Include no exploit details, triggering files or private data in that public request; wait for a private reporting route before sharing them.
 
 Include:
 

@@ -34,8 +34,21 @@ Get-ChildItem -LiteralPath $destination -File -Recurse | Where-Object {
     $_.LastWriteTime.Year -lt 1980 -or $_.LastWriteTime.Year -gt 2107
 } | ForEach-Object { $_.LastWriteTime = [datetime]'2000-01-01T12:00:00' }
 Compress-Archive -LiteralPath $destination -DestinationPath $zip -Force
-$hashes = Get-FileHash -LiteralPath @($zip, (Join-Path $artifacts (Split-Path $installer -Leaf)), (Join-Path $destination 'Keyloom.exe')) -Algorithm SHA256
-$hashes | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $($_.Path.Substring($artifacts.Length + 1))" } | Set-Content -LiteralPath (Join-Path $artifacts 'SHA256SUMS.txt')
+# Build.ps1 deliberately shortens PATH; inherited PowerShell module paths can
+# also differ between pwsh and Windows PowerShell. Hash with the framework so
+# packaging does not depend on Get-FileHash module auto-loading.
+$checksumLines = foreach ($file in @($zip, (Join-Path $artifacts (Split-Path $installer -Leaf)), (Join-Path $destination 'Keyloom.exe'))) {
+    $stream = [IO.File]::OpenRead($file)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+        "$hash  $($file.Substring($artifacts.Length + 1))"
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+$checksumLines | Set-Content -LiteralPath (Join-Path $artifacts 'SHA256SUMS.txt') -Encoding UTF8
 "Portable app: $destination"
 "ZIP: $zip"
 "Installer: $(Join-Path $artifacts (Split-Path $installer -Leaf))"

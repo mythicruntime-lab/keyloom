@@ -55,6 +55,8 @@ pub struct InputEvent {
 #[derive(Clone, Serialize)]
 pub struct AppStatus {
     pub transport: TransportSnapshot,
+    // Filled by the app's status command, independently of transport timing.
+    pub persistence_error: Option<String>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
     pub device_connected: bool,
@@ -110,6 +112,7 @@ impl Runtime {
         let engine = Engine::new();
         let initial = AppStatus {
             transport: engine.snapshot(),
+            persistence_error: None,
             device_id: preferences.device_id.clone(),
             device_name: None,
             device_connected: false,
@@ -173,7 +176,7 @@ impl Runtime {
                 worker.sync_guide();
                 if published.elapsed()>=Duration::from_millis(30) {published=Instant::now();let snapshot=worker.engine.snapshot();worker.settings.position_ms=snapshot.position_ms;
                     let audio_error=if worker.audio.error.load(Ordering::Acquire){Some("Windows audio device changed or failed. Restart Keyloom to reopen audio.".into())}else{worker.audio_error.clone()};
-                    if let Ok(mut shared)=status.lock(){*shared=AppStatus{transport:snapshot,device_id:worker.preferences.device_id.clone(),device_name:worker.device_name.clone(),device_connected:worker.connection.is_some(),device_error:worker.device_error.clone(),output_device_id:worker.preferences.output_device_id.clone(),output_device_name:worker.output_name.clone(),output_connected:worker.output.is_some(),output_error:worker.output_status_error(),light_guide:worker.preferences.light_guide,light_test_active:worker.test_until.is_some(),lit_notes:worker.guide.lit_notes(),output_messages:worker.output_messages,audio_available:audio_error.is_none(),audio_error,audio_frames:worker.audio.frames.load(Ordering::Relaxed),audio_nonzero_frames:worker.audio.nonzero_frames.load(Ordering::Relaxed),events:worker.events.clone(),held:(0..128).filter(|p|worker.held.iter().any(|channel|channel[*p])).map(|p|p as u8).collect(),dropped_events:loss};}
+                    if let Ok(mut shared)=status.lock(){*shared=AppStatus{transport:snapshot,persistence_error:None,device_id:worker.preferences.device_id.clone(),device_name:worker.device_name.clone(),device_connected:worker.connection.is_some(),device_error:worker.device_error.clone(),output_device_id:worker.preferences.output_device_id.clone(),output_device_name:worker.output_name.clone(),output_connected:worker.output.is_some(),output_error:worker.output_status_error(),light_guide:worker.preferences.light_guide,light_test_active:worker.test_until.is_some(),lit_notes:worker.guide.lit_notes(),output_messages:worker.output_messages,audio_available:audio_error.is_none(),audio_error,audio_frames:worker.audio.frames.load(Ordering::Relaxed),audio_nonzero_frames:worker.audio.nonzero_frames.load(Ordering::Relaxed),events:worker.events.clone(),held:(0..128).filter(|p|worker.held.iter().any(|channel|channel[*p])).map(|p|p as u8).collect(),dropped_events:loss};}
                 }
             }
             worker.reset();drop(worker.connection);

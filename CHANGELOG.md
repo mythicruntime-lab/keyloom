@@ -2,13 +2,18 @@
 
 User-visible changes to Keyloom are recorded here. Versions up to 0.4.0 were local builds made before the repository was published.
 
-## 0.4.2 — unreleased
+## 0.4.2-beta.1 — beta candidate, not yet published
 
 - When no MIDI output is connected, the Light Guide checkboxes now say why they can't be ticked instead of only explaining on hover. On the practice screen, the hint opens Keyboard & sound.
+- Queue preference changes and device-selection refreshes in order so rapid changes retain every acknowledged edit. A failed change no longer blocks later changes.
+- Keep an automatic-save warning visible across screens until a retry succeeds. If the final save fails, closing asks whether to discard the latest practice position/settings or keep the window open for retries.
+- Add regressions for overlapping preference changes, invalid-change recovery and real database save failures/recovery in isolated native tests. Existing library/schema compatibility is unchanged.
+- Reconcile redistribution notices with the recorded maintainer decisions and document the beta's remaining hardware and installer acceptance checks.
+- Generate package checksums through .NET so packaging also succeeds when PowerShell cannot auto-load `Get-FileHash` in the shortened build environment.
 
 ## 0.4.1 — 2026-10-28
 
-First public release. No practice, library or editing behavior changed from 0.4.0.
+Prepared as the first public release candidate; no GitHub Release was published. No practice, library or editing behavior changed from 0.4.0.
 
 - Changed the app identifier from `app.keyloom.desktop`, which pointed at a domain the project doesn't own, to `io.github.mythicruntime-lab.keyloom`. Application data now lives in `%LOCALAPPDATA%\io.github.mythicruntime-lab.keyloom`. Libraries from 0.4.0 and earlier are not moved automatically; copy the old folder's contents across with Keyloom closed. The installer's publisher stays `keyloom`, so upgrades still find the existing install.
 - Rewrote the bundled README for new users and replaced the internal handoff notes with `ROADMAP.md`. The portable ZIP now includes the same `docs` folder as the installer.

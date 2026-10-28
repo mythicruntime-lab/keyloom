@@ -1,5 +1,9 @@
 # Yamaha verification
 
+## 0.4.2-beta.1 acceptance
+
+Automated reliability checks cover queued preferences and save-failure warnings/recovery. They do not replace the physical checks below. Before widening the beta, verify edited/thinned/range-fitted targets on the Yamaha, repeated notes, an extended playing session, and cable loss/reconnection with notes lit. Record observed results and the keyboard/interface models here. The current-version installer retention check belongs in the test report and needs a disposable Windows profile.
+
 ## Previewed chord thinning and range fitting — 0.4.0, pending
 
 The 0.4.0 software build/package checks and both final native workflows passed; details are in the test report. Physical acceptance of the new preview/apply targets is still pending. The first planned check is highest-note thinning on the demo's first C3+C4 chord (retaining C4), Undo restoring both notes, and pause clearing the lights. Only an observation at the keyboard can establish this result; automated sends and simulations do not.

@@ -27,6 +27,8 @@ pub struct AppState {
     pub pending: Mutex<Vec<String>>,
     pub importing: Arc<AtomicBool>,
     pub operations: Arc<Mutex<()>>,
+    persistence_error: Mutex<Option<String>>,
+    exit_prepared: AtomicBool,
     smoke: Option<SmokeConfig>,
     started: Instant,
     launch_to_ui_us: AtomicU64,
@@ -66,8 +68,34 @@ fn lock_error<T>(e: std::sync::PoisonError<T>) -> String {
     format!("Keyloom state unavailable: {e}")
 }
 pub fn persist(state: &AppState) -> Result<(), String> {
-    let _guard = state.operations.lock().map_err(lock_error)?;
-    persist_session(&state.library, &state.runtime)
+    // Keep the operation guard through warning publication so a late failure
+    // cannot overwrite a newer successful retry. Never hold the warning lock
+    // during disk I/O: status polling must remain responsive.
+    let guard = state.operations.lock().map_err(lock_error);
+    let checkpoint = match &guard {
+        Ok(_) => state.runtime.checkpoint(),
+        Err(error) => Err(error.clone()),
+    };
+    persist_checkpoint(&state.library, checkpoint, &state.persistence_error)
+}
+fn persist_checkpoint(
+    library: &Mutex<Library>,
+    checkpoint: Result<Option<(String, SongSettings)>, String>,
+    warning: &Mutex<Option<String>>,
+) -> Result<(), String> {
+    let result = (|| {
+        if let Some((id, settings)) = checkpoint? {
+            library
+                .lock()
+                .map_err(lock_error)?
+                .save_settings(&id, &settings)?;
+        }
+        Ok(())
+    })();
+    *warning.lock().map_err(lock_error)? = result.as_ref().err().map(|error: &String| {
+        format!("Could not save your latest practice position and settings. Keyloom will retry automatically. {error}")
+    });
+    result
 }
 fn persist_session(library: &Arc<Mutex<Library>>, runtime: &Runtime) -> Result<(), String> {
     if let Some((id, settings)) = runtime.checkpoint()? {
@@ -615,12 +643,14 @@ async fn preferences(
 }
 #[tauri::command]
 fn status(state: tauri::State<AppState>) -> Result<AppStatus, String> {
-    state
+    let mut snapshot = state
         .runtime
         .status
         .lock()
         .map(|s| s.clone())
-        .map_err(lock_error)
+        .map_err(lock_error)?;
+    snapshot.persistence_error = state.persistence_error.lock().map_err(lock_error)?.clone();
+    Ok(snapshot)
 }
 #[tauri::command]
 async fn demo_import(state: tauri::State<'_, AppState>) -> Result<ImportResult, String> {
@@ -655,6 +685,36 @@ fn smoke_config(state: tauri::State<AppState>) -> Option<SmokeConfig> {
         )
         .ok();
     state.smoke.clone()
+}
+#[tauri::command]
+async fn smoke_save_failure(
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if state.smoke.is_none() {
+        return Err("Native smoke tests were not enabled on the command line".into());
+    }
+    let root = state.root.clone();
+    let operations = state.operations.clone();
+    blocking(move || {
+        let _guard = operations.lock().map_err(lock_error)?;
+        let db = rusqlite::Connection::open(root.join("library.sqlite3"))
+            .map_err(|error| error.to_string())?;
+        set_smoke_save_failure(&db, enabled)
+    })
+    .await
+}
+fn set_smoke_save_failure(db: &rusqlite::Connection, enabled: bool) -> Result<(), String> {
+    let sql = if enabled {
+        "CREATE TRIGGER IF NOT EXISTS keyloom_smoke_save_songs BEFORE UPDATE OF settings_json ON songs
+         BEGIN SELECT RAISE(FAIL, 'Simulated smoke-test save failure'); END;
+         CREATE TRIGGER IF NOT EXISTS keyloom_smoke_save_variants BEFORE UPDATE OF settings_json ON variants
+         BEGIN SELECT RAISE(FAIL, 'Simulated smoke-test save failure'); END;"
+    } else {
+        "DROP TRIGGER IF EXISTS keyloom_smoke_save_songs;
+         DROP TRIGGER IF EXISTS keyloom_smoke_save_variants;"
+    };
+    db.execute_batch(sql).map_err(|error| error.to_string())
 }
 #[tauri::command(rename_all = "snake_case")]
 fn smoke_open_files(
@@ -728,27 +788,195 @@ pub fn file_args(args: impl Iterator<Item = String>, cwd: &Path) -> Vec<String> 
     .take(64)
     .collect()
 }
+fn prepare_exit(state: &AppState) -> bool {
+    if state.exit_prepared.load(Ordering::Acquire) {
+        return true;
+    }
+    // Pause before the final checkpoint and before any dialog so the saved
+    // position is stable and guidance does not stay active while deciding.
+    let _ = state.runtime.send(Command::Pause);
+    if let Err(error) = persist(state) {
+        let answer = rfd::MessageDialog::new()
+            .set_title("Keyloom could not save")
+            .set_description(format!(
+                "Your latest practice position and settings could not be saved.\n\n{error}\n\nClose without saving them? Choose No to keep Keyloom open while it retries."
+            ))
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if answer != rfd::MessageDialogResult::Yes {
+            return false;
+        }
+    }
+    state.exit_prepared.store(true, Ordering::Release);
+    true
+}
 pub fn run() {
     let started = Instant::now();
-    let builder=tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app,args,cwd|{
-        let paths=file_args(args.into_iter().skip(1),Path::new(&cwd));if let Some(state)=app.try_state::<AppState>(){if let Ok(mut p)=state.pending.lock(){let capacity=64_usize.saturating_sub(p.len());p.extend(paths.into_iter().take(capacity));}app.emit("files-opened",()).ok();}
-        if let Some(window)=app.get_webview_window("main"){window.unminimize().ok();window.set_focus().ok();}
-    })).setup(move |app|{
-        let args:Vec<String>=std::env::args().collect();let smoke_root=args.iter().position(|a|a=="--smoke-test").and_then(|i|args.get(i+1)).map(PathBuf::from);
-        let root=smoke_root.clone().unwrap_or(app.path().app_local_data_dir()?);std::fs::create_dir_all(&root)?;let library=Library::open(root.clone()).map_err(std::io::Error::other)?;
-        let smoke=if smoke_root.is_some(){let directory=root.join("inputs with spaces 日本語");std::fs::create_dir_all(&directory)?;let first=directory.join("First threads.mid");let second=directory.join("Tempo and pedal.midi");let corrupt=directory.join("Broken.mid");if !args.iter().any(|a|a=="--smoke-restart"){std::fs::write(&first,fixtures::demo_midi())?;std::fs::write(&second,fixtures::tempo_sustain())?;std::fs::write(&corrupt,b"invalid MIDI")?;}let first=args.iter().position(|a|a=="--smoke-midi").and_then(|i|args.get(i+1)).map(PathBuf::from).unwrap_or(first);Some(SmokeConfig{phase:if args.iter().any(|a|a=="--smoke-restart"){"restart"}else{"exercise"}.into(),paths:[first,second,corrupt].iter().map(|p|p.to_string_lossy().into_owned()).collect(),expected_count:2,export_path:root.join("exported").join("Keyloom edited export.mid").to_string_lossy().into_owned(),device_id:args.iter().position(|a|a=="--smoke-device").and_then(|i|args.get(i+1)).cloned(),output_device_id:args.iter().position(|a|a=="--smoke-output").and_then(|i|args.get(i+1)).cloned()})}else{None};
-        let preferences=read_preferences(&root);let runtime=Runtime::start(preferences.clone());let pending=if smoke.is_some(){Vec::new()}else{file_args(std::env::args().skip(1),&std::env::current_dir()?)};
-        app.manage(AppState{library:Arc::new(Mutex::new(library)),runtime,preferences:Arc::new(Mutex::new(preferences)),root,pending:Mutex::new(pending),importing:Arc::new(AtomicBool::new(false)),operations:Arc::new(Mutex::new(())),smoke,started,launch_to_ui_us:AtomicU64::new(0)});
-        let handle=app.handle().clone();std::thread::Builder::new().name("keyloom-save".into()).spawn(move||loop{std::thread::sleep(Duration::from_secs(5));if let Some(state)=handle.try_state::<AppState>(){if persist(&state).is_err(){/* Kept out of timing path; exit retries persistence. */}}else{break;}})?;
-        Ok(())
-    }).invoke_handler(tauri::generate_handler![library_list,import_files,import_dialog,open_song,lesson_versions,create_variant,remove_notes,undo_notes,transpose_notes,preview_lesson_tool,apply_lesson_tool,save_metadata,save_settings,remove_song,export_song,devices,connect_device,output_devices,connect_output,test_light,control,input_note,preferences,status,demo_import,take_pending_files,smoke_config,smoke_open_files,smoke_report]);
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let paths = file_args(args.into_iter().skip(1), Path::new(&cwd));
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut p) = state.pending.lock() {
+                    let capacity = 64_usize.saturating_sub(p.len());
+                    p.extend(paths.into_iter().take(capacity));
+                }
+                app.emit("files-opened", ()).ok();
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                window.unminimize().ok();
+                window.set_focus().ok();
+            }
+        }))
+        .setup(move |app| {
+            let args: Vec<String> = std::env::args().collect();
+            let smoke_root = args
+                .iter()
+                .position(|a| a == "--smoke-test")
+                .and_then(|i| args.get(i + 1))
+                .map(PathBuf::from);
+            let root = smoke_root
+                .clone()
+                .unwrap_or(app.path().app_local_data_dir()?);
+            std::fs::create_dir_all(&root)?;
+            let library = Library::open(root.clone()).map_err(std::io::Error::other)?;
+            let smoke = if smoke_root.is_some() {
+                let directory = root.join("inputs with spaces 日本語");
+                std::fs::create_dir_all(&directory)?;
+                let first = directory.join("First threads.mid");
+                let second = directory.join("Tempo and pedal.midi");
+                let corrupt = directory.join("Broken.mid");
+                if !args.iter().any(|a| a == "--smoke-restart") {
+                    std::fs::write(&first, fixtures::demo_midi())?;
+                    std::fs::write(&second, fixtures::tempo_sustain())?;
+                    std::fs::write(&corrupt, b"invalid MIDI")?;
+                }
+                let first = args
+                    .iter()
+                    .position(|a| a == "--smoke-midi")
+                    .and_then(|i| args.get(i + 1))
+                    .map(PathBuf::from)
+                    .unwrap_or(first);
+                Some(SmokeConfig {
+                    phase: if args.iter().any(|a| a == "--smoke-restart") {
+                        "restart"
+                    } else {
+                        "exercise"
+                    }
+                    .into(),
+                    paths: [first, second, corrupt]
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect(),
+                    expected_count: 2,
+                    export_path: root
+                        .join("exported")
+                        .join("Keyloom edited export.mid")
+                        .to_string_lossy()
+                        .into_owned(),
+                    device_id: args
+                        .iter()
+                        .position(|a| a == "--smoke-device")
+                        .and_then(|i| args.get(i + 1))
+                        .cloned(),
+                    output_device_id: args
+                        .iter()
+                        .position(|a| a == "--smoke-output")
+                        .and_then(|i| args.get(i + 1))
+                        .cloned(),
+                })
+            } else {
+                None
+            };
+            let preferences = read_preferences(&root);
+            let runtime = Runtime::start(preferences.clone());
+            let pending = if smoke.is_some() {
+                Vec::new()
+            } else {
+                file_args(std::env::args().skip(1), &std::env::current_dir()?)
+            };
+            app.manage(AppState {
+                library: Arc::new(Mutex::new(library)),
+                runtime,
+                preferences: Arc::new(Mutex::new(preferences)),
+                root,
+                pending: Mutex::new(pending),
+                importing: Arc::new(AtomicBool::new(false)),
+                operations: Arc::new(Mutex::new(())),
+                persistence_error: Mutex::new(None),
+                exit_prepared: AtomicBool::new(false),
+                smoke,
+                started,
+                launch_to_ui_us: AtomicU64::new(0),
+            });
+            let handle = app.handle().clone();
+            std::thread::Builder::new()
+                .name("keyloom-save".into())
+                .spawn(move || loop {
+                    std::thread::sleep(Duration::from_secs(5));
+                    if let Some(state) = handle.try_state::<AppState>() {
+                        let _ = persist(&state); /* persist publishes failure/recovery to the UI. */
+                    } else {
+                        break;
+                    }
+                })?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            library_list,
+            import_files,
+            import_dialog,
+            open_song,
+            lesson_versions,
+            create_variant,
+            remove_notes,
+            undo_notes,
+            transpose_notes,
+            preview_lesson_tool,
+            apply_lesson_tool,
+            save_metadata,
+            save_settings,
+            remove_song,
+            export_song,
+            devices,
+            connect_device,
+            output_devices,
+            connect_output,
+            test_light,
+            control,
+            input_note,
+            preferences,
+            status,
+            demo_import,
+            take_pending_files,
+            smoke_config,
+            smoke_save_failure,
+            smoke_open_files,
+            smoke_report
+        ]);
     let application = builder
         .build(tauri::generate_context!())
         .expect("Keyloom could not initialize its local application data or WebView2 window");
     application.run(|app, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+        if let tauri::RunEvent::WindowEvent {
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } = &event
+        {
+            // Handle this before the last window is destroyed. Cancelling only
+            // ExitRequested would otherwise leave an invisible process behind.
             if let Some(state) = app.try_state::<AppState>() {
-                persist(&state).ok();
+                if !prepare_exit(&state) {
+                    api.prevent_close();
+                }
+            }
+        }
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            if let Some(state) = app.try_state::<AppState>() {
+                if !prepare_exit(&state) {
+                    api.prevent_exit();
+                    return;
+                }
                 if let Err(error) = state.runtime.shutdown() {
                     rfd::MessageDialog::new()
                         .set_title("Keyloom MIDI cleanup")
@@ -759,4 +987,82 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_checkpoints_and_database_writes_report_until_a_successful_retry() {
+        struct TestDirectory(PathBuf);
+        impl Drop for TestDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = TestDirectory(std::env::temp_dir().join(format!(
+            "keyloom-save-warning-{}-{unique}",
+            std::process::id()
+        )));
+        std::fs::create_dir(&directory.0).unwrap();
+        let root = directory.0.join("library");
+        let mut library = Library::open(root.clone()).unwrap();
+        let source = directory.0.join("original.mid");
+        std::fs::write(&source, fixtures::demo_midi()).unwrap();
+        let entry = library.import_path(&source).unwrap().entry;
+        let initial = library.settings(&entry.id).unwrap();
+        let mut changed = initial.clone();
+        changed.position_ms = 500.0;
+        changed.speed = 0.75;
+        let library = Mutex::new(library);
+        let warning = Mutex::new(None);
+
+        let error = persist_checkpoint(&library, Err("checkpoint unavailable".into()), &warning)
+            .unwrap_err();
+        assert_eq!(error, "checkpoint unavailable");
+        assert!(warning.lock().unwrap().as_ref().unwrap().contains(&error));
+
+        let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+        set_smoke_save_failure(&db, true).unwrap();
+        for _ in 0..2 {
+            let error = persist_checkpoint(
+                &library,
+                Ok(Some((entry.id.clone(), changed.clone()))),
+                &warning,
+            )
+            .unwrap_err();
+            assert!(error.contains("Simulated smoke-test save failure"));
+            assert!(warning.lock().unwrap().as_ref().unwrap().contains(&error));
+            assert_eq!(
+                library
+                    .lock()
+                    .unwrap()
+                    .settings(&entry.id)
+                    .unwrap()
+                    .position_ms,
+                initial.position_ms
+            );
+        }
+        set_smoke_save_failure(&db, false).unwrap();
+        persist_checkpoint(
+            &library,
+            Ok(Some((entry.id.clone(), changed.clone()))),
+            &warning,
+        )
+        .unwrap();
+        assert!(warning.lock().unwrap().is_none());
+        let saved = library.lock().unwrap().settings(&entry.id).unwrap();
+        assert_eq!(saved.position_ms, changed.position_ms);
+        assert_eq!(saved.speed, changed.speed);
+        drop(db);
+        drop(library);
+        let reopened = Library::open(root).unwrap();
+        assert_eq!(reopened.settings(&entry.id).unwrap().position_ms, 500.0);
+        assert_eq!(std::fs::read(source).unwrap(), fixtures::demo_midi());
+    }
 }

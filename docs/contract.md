@@ -2,6 +2,14 @@
 
 All JSON uses snake_case. Musical times are milliseconds as f64 at original tempo. Transport speed scales wall time, never pitches. IDs are stable within a parsed file; library IDs are SHA-256 of exact source bytes.
 
+## Beta reliability (0.4.2-beta.1)
+
+The frontend serializes preference changes, initial preference reads and device-selection refreshes. Each patch merges with the most recently acknowledged preferences when it reaches the queue; a rejected change does not poison later work. Native connection commands retain ownership of device IDs.
+
+`AppStatus.persistence_error:string|null` reports the last periodic/final session save failure independently of the transport worker. The application updates it after a checkpoint/database result under the session-operation lock; status polling does not wait on disk I/O. The frontend keeps the warning visible across screens until a subsequent successful periodic save clears it. Closing pauses practice and checks persistence before destroying the last window. A failed save offers keeping the window open for automatic retries or explicit exit without the latest position/settings. MIDI cleanup still runs on confirmed exit. No database schema or stored-preference format changes.
+
+The opt-in isolated native harness can use `smoke_save_failure { enabled:bool }` to create/remove database triggers that reject session-setting writes. Normal launches reject this command. This tests actual write failure, warning visibility and recovery without changing permissions or the normal library.
+
 ## Preview tools (0.4.0)
 
 `LessonToolRequest` is a snake_case tagged enum with unknown fields refused: `{ kind:"thin", strategy:"highest"|"bass_highest"|"limit", max_notes:u8, part_id:u32|null }` or `{ kind:"shift", note_ids:u32[], semitones:i16 }`. `max_notes` must be 1–8 for every thin request and controls the retained count only for `limit`. Shift accepts only −12 or +12; existing immediate pitch IPC remains available separately. `LessonPreview { revision:u64, changes:NoteChange[] }`; `NoteChange { note_id:u32, from_pitch:u8, to_pitch:u8|null }`, where null means removal. Changes are returned in ascending stable note-ID order.
