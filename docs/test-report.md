@@ -2,6 +2,14 @@
 
 This is the release-by-release verification record. "The maintainer" is the person who ran the physical Yamaha checks. Paths under `test-output/` name local evidence that is deliberately not committed (it contains private libraries, logs and test MIDI).
 
+## Fresh-clone verification — 27 October 2026
+
+A new clone of commit `e35fb1c` in an empty folder, with the pinned Rust 1.98.0 and Node 24.11.1 and two Cargo workers, passed every GitHub Actions step: `npm ci`, TypeScript, Prettier, frontend build, rustfmt, strict Clippy (181 s), the Rust tests with the release protocol feature (190 s) and the license audit with no drift. `Build.ps1 -Mode package` then built the release executable, NSIS installer, portable folder, ZIP and checksums (402 s). No untracked file was needed.
+
+The second audit after packaging showed that the generated installer script embeds absolute checkout and NSIS cache paths, so its recorded hash depended on the build machine. The audit now hashes the script with those two prefixes replaced; the inventory records the new location-independent value.
+
+The fresh-clone release executable passed the native exercise (13 checks, 17,101.3 ms) and restart (3 checks, 924.5 ms) with **USB MIDI Interface** as input and Light Guide output. The port opened, closed and reopened, and the channel-1 middle-C test and cleanup were sent. Nobody watched the keyboard during this run, so no physical illumination is claimed. Evidence: ignored `test-output/fresh-clone-20261027d-summary.json` and `test-output/native-fresh-clone-20261027`.
+
 ## 0.4.0 previewable simplification — 12 October 2026
 
 The 0.3.0 baseline was clean at `90870fb`; 134 Rust executions and TypeScript passed before changes. The 0.4.0 suite passes **141 Rust executions** (56 unit + 70 library/transport integration + 15 export/model integration; 97 distinct cases; one optional benchmark ignored), strict Clippy, Rust/Prettier formatting, TypeScript and the Windows production build. Seven new integration cases cover exact-onset grouping, deterministic equal-pitch ties, percussion and part scoping, sparse IDs/current pitch overrides, read-only previews, no-op and invalid batch atomicity, stale previews across two connections, legacy mixed Undo/restart, export→reimport→actual transport, and one-step Undo of a 10,000-note unison chord. No schema or dependency versions changed.

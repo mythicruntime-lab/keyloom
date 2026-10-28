@@ -565,7 +565,6 @@ const generatedInstaller = path.join(
 const installerReview = {
   status: "not generated",
   public_release_items: [
-    "Confirm copyright holder in project LICENSE before public distribution.",
     "Verify installed/portable notice copies after the final packaging pass.",
     "nsis_tauri_utils 0.5.3 is an upstream prebuilt DLL: exact transitive/compiler versions are not supplied by its source tag (no published Cargo.lock/SBOM verified).",
     "Confirm Microsoft Build Tools/static Visual C++ runtime redistribution rights under the installed toolchain terms before public distribution.",
@@ -593,6 +592,12 @@ if (
   const pluginRelative = "Plugins/x86-unicode/additional/nsis_tauri_utils.dll";
   const pluginBytes = fs.readFileSync(path.join(nsisCache, pluginRelative));
   const pluginSha1 = createHash("sha1").update(pluginBytes).digest("hex");
+  // Tauri writes absolute checkout and NSIS cache paths into the script; hash it
+  // with those replaced so the recorded value does not depend on the machine.
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const portableScript = script
+    .replace(new RegExp(escapeRegExp(root), "gi"), "<repo>")
+    .replace(new RegExp(escapeRegExp(nsisCache), "gi"), "<nsis>");
   if (nsisVersion !== "v3.11")
     issues.push(`Installer: unreviewed NSIS version ${nsisVersion}`);
   if (compression !== "zlib")
@@ -644,7 +649,7 @@ if (
       scope:
         "cache input; includes potentially unused standard plugins, not an extracted installer inventory",
     })),
-    generated_script_sha256: hash(script),
+    generated_script_sha256: hash(portableScript),
     hooks_sha256: hash(hooks),
     optional_unpin_helper: {
       excluded_by_empty_override: expectedOrder && emptyOverride,

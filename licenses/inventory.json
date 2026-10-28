@@ -6896,7 +6896,6 @@
   "installer": {
     "status": "generated inputs inspected; final build and installed copies require separate verification",
     "public_release_items": [
-      "Confirm copyright holder in project LICENSE before public distribution.",
       "Verify installed/portable notice copies after the final packaging pass.",
       "nsis_tauri_utils 0.5.3 is an upstream prebuilt DLL: exact transitive/compiler versions are not supplied by its source tag (no published Cargo.lock/SBOM verified).",
       "Confirm Microsoft Build Tools/static Visual C++ runtime redistribution rights under the installed toolchain terms before public distribution."
@@ -6962,7 +6961,7 @@
         "scope": "cache input; includes potentially unused standard plugins, not an extracted installer inventory"
       }
     ],
-    "generated_script_sha256": "ad3923bd56038b85d0821bf21990f1c5ebdbfc2be3c14f86fc140eb7323f10f1",
+    "generated_script_sha256": "d820bb1bb285e26bd95acf05887a2fa11f4bda82cff615b469453eb70e10a050",
     "hooks_sha256": "d5b161c1a4a290a7b023a9fd747e660f9042da83bfff35181cc41872474d29f2",
     "optional_unpin_helper": {
       "excluded_by_empty_override": true,

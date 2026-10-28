@@ -28,7 +28,7 @@ jobs:
           cache: npm
 
       - name: Install the Rust toolchain from rust-toolchain.toml
-        run: rustup toolchain install
+        run: rustup toolchain install --no-self-update
 
       - uses: Swatinem/rust-cache@v2
         with:
